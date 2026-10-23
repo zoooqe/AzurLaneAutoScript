@@ -1,8 +1,5 @@
-"""Tests for the decision logic of the island transport module.
+"""Tests for the decision logic of the island transport module."""
 
-Run from the repo root (pytest is not a repo dependency):
-    PYTHONDONTWRITEBYTECODE=1 pixi run python -m pytest tests/island/test_transport.py -v
-"""
 import pytest
 
 import module.island.transport as transport
@@ -49,27 +46,6 @@ def test_assign_swaps_fills_blocked_slots_first():
     assert assign_swaps([0, 2], chosen_slots=[0, 2], chosen_subs=['01'], blocked_slots=[]) == []
 
 
-def test_record_list_unknown_swaps_into_free_slots():
-    module = object.__new__(IslandTransport)
-    swapped, scanned = [], []
-    module.transport_swap = lambda slot, sub: swapped.append((slot, sub.name)) or True
-    module.transport_scan_slots = lambda rewards=True: scanned.append(rewards)
-    slots = {slot: commission(f'P{slot + 1}', [('Onion', 7)], {'Onion': 100}, slot=slot) for slot in range(3)}
-    slots[2].unknown = True
-    subs = {index: commission(f'{index:02d}', [('Apple', 19)], {'Apple': 219}, index=index) for index in (1, 3, 4)}
-    subs[1].unknown = subs[4].unknown = True
-
-    module.transport_record_list_unknown(slots, subs, used=[0])
-    # P3 can't be valued itself, so it is replaced first
-    assert swapped == [(2, '01'), (1, '04')]
-    assert scanned == [False]
-
-    swapped.clear()
-    scanned.clear()
-    module.transport_record_list_unknown(slots, subs, used=[0, 1, 2])
-    assert swapped == [] and scanned == []
-
-
 def test_needs_fish_meat_only_for_submissions():
     reward_only = commission('01', [('Onion', 6)], {'Onion': 84}, index=1, rewards={'Freshwater Fish Meat': 11})
     submit = commission('P3', [('Saltwater Fish Meat', 4)], {'Saltwater Fish Meat': 1}, slot=2)
@@ -96,6 +72,8 @@ def test_needs_fish_meat_largest_needs():
 
 def test_decide_swaps_into_blocked_slot(monkeypatch):
     class FakeOptimizer:
+        success = True
+
         def __init__(self, problem, max_commissions):
             FakeOptimizer.max_commissions = max_commissions
 
@@ -132,6 +110,13 @@ def test_decide_swaps_into_blocked_slot(monkeypatch):
 class FakeTaskConfig:
     def __init__(self):
         self.calls = []
+        self.storage = {}
+
+    def cross_get(self, key, default=None):
+        return self.storage.get(key, default)
+
+    def cross_set(self, key, value):
+        self.storage[key] = value
 
     def task_delay(self, **kwargs):
         self.calls.append(('task_delay', kwargs))
@@ -153,19 +138,33 @@ def run_module(submit=(), submit_success=True):
     module.submitted = []
     module.server_support_island_transport = lambda: True
     module.ui_ensure = lambda page: None
-    module.transport_claim_rewards = lambda: None
+    module.transport_claim_rewards = lambda: True
     module.transport_scan_slots = lambda rewards=True: ({}, {})
     module.needs_fish_meat = lambda commissions, max_commissions: False
     module.transport_decide = lambda slots, subs: ([], list(submit)) if submit else None
     module.transport_submit = lambda slot: module.submitted.append(slot) or submit_success
-    module.transport_record_list_unknown = lambda slots, subs, used: None
-    module.transport_notify_unknown = lambda: None
     module.transport_next_run_time = lambda: None
     return module
 
 
 def task_calls(module):
     return [call for call in module.config.calls if call[0] == 'task_call']
+
+
+def test_unknown_commissions_do_not_trigger_swaps():
+    module = run_module()
+    primary = commission('P1', [('Onion', 7)], {'Onion': 100}, slot=0)
+    listed = commission('01', [('Apple', 19)], {'Apple': 219}, index=1)
+    primary.unknown = listed.unknown = True
+    module.transport_scan_slots = lambda rewards=True: (['ready'], {0: primary})
+    module.transport_scan_list = lambda: {1: listed}
+    swapped = []
+    module.transport_swap = lambda slot, sub: swapped.append((slot, sub.name)) or True
+
+    module.run()
+
+    assert swapped == []
+    assert module.submitted == []
 
 
 def test_submit_calls_island_order():

@@ -1,12 +1,13 @@
 """
-Island transport commissions (JP layout).
+Island transport commissions.
 
-Scans the 3 primary slots and the sub-commission list (委託一覧), lets
-TransportOptimizer choose what to submit, swaps chosen sub-commissions into
-primary slots whose commission is not chosen, then submits with 一括受注.
+Scan the three primary slots and commission list, let TransportOptimizer choose
+commissions to submit, swap selected list commissions into unchosen primary slots,
+and submit the selected slots. Preserve worthwhile jobs in idle primary slots
+before refreshing an unproductive list.
 """
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import cv2
 import numpy as np
@@ -22,7 +23,6 @@ from module.base.utils import (
     load_image,
     random_rectangle_vector_opted,
     rgb2luma,
-    save_image,
 )
 from module.island.assets import *
 from module.island.data import DIC_ISLAND_ITEM
@@ -33,7 +33,7 @@ from module.island_handler.recipe import IslandReversedDigitCounter
 from module.island_handler.restaurant_config import get_menu_reserve_items
 from module.island_handler.transport_optimizer import TransportCommission, TransportOptimizer
 from module.logger import logger
-from module.ocr.ocr import Digit, Duration
+from module.ocr.ocr import Digit, DigitCounter, Duration
 from module.ui.navbar import Navbar
 from module.ui.page import page_island, page_island_transport
 from module.ui.switch import Switch
@@ -43,6 +43,7 @@ SLOT_DELTA = 175
 TEXT_BLUE = (57, 190, 255)
 TEXT_RED = (244, 124, 124)
 BAR_ORANGE = (248, 180, 76)
+EMPTY_GREY = (211, 211, 211)
 BADGE_DARK = (76, 80, 84)
 ROW_SELECTED = (187, 220, 236)
 # A selected list row is blended with this blue: selected = (1 - alpha) * original + alpha * ROW_MASK
@@ -71,6 +72,10 @@ LIST_AREA = (400, 150, 900, 580)
 LIST_DRAG_AREA = (750, 170, 890, 560)
 LIST_SUBMISSION_X = (490, 578, 665)
 LIST_REWARD_X = (486, 574, 661)
+REFRESH_TIMER_AREA = (722, 86, 810, 114)
+REFRESH_COOLDOWN = timedelta(hours=4)
+REFRESH_RETRY = timedelta(minutes=15)
+REFRESH_STORAGE = 'IslandTransport.Storage.Storage.RefreshAvailableAt'
 
 
 class TransportViewSwitch(Switch):
@@ -83,6 +88,8 @@ TRANSPORT_VIEW = TransportViewSwitch('Transport_view', offset=(10, 10))
 TRANSPORT_VIEW.add_state('content', check_button=ISLAND_TRANSPORT_VIEW_REWARD)
 TRANSPORT_VIEW.add_state('reward', check_button=ISLAND_TRANSPORT_VIEW_CONTENT)
 
+def counter_dy():
+    return 6 if server.server == 'en' else 0
 
 def primary_counter_area(card, slot):
     """
@@ -91,7 +98,8 @@ def primary_counter_area(card, slot):
     """
     x = SUBMISSION_GRID[card, slot].area[0]
     left = SUBMISSION_GRID[card - 1, slot].area[0] + 85 if card else x - 20
-    return left, 239 + SLOT_DELTA * slot, x + 84, 255 + SLOT_DELTA * slot
+    dy = counter_dy()
+    return left, 239 + dy + SLOT_DELTA * slot, x + 84, 255 + dy + SLOT_DELTA * slot
 
 
 def adjust_counter(stock, need, spilled=False, covered=False):
@@ -140,20 +148,21 @@ def remove_row_mask(image, row):
     return image
 
 
-def assign_swaps(ready_slots, chosen_slots, chosen_subs, blocked_slots):
+def assign_swaps(ready_slots, chosen_slots, chosen_subs, blocked_slots, empty_slots=()):
     """
     Args:
-        ready_slots (list[int]): Primary slots that can be submitted.
+        ready_slots (list[int]): Idle primary slots available for the selection.
         chosen_slots (list[int]): Ready slots whose own commission is chosen.
         chosen_subs (list): Chosen list commissions.
         blocked_slots (list[int]): Ready slots whose commission can't be submitted now.
+        empty_slots (list[int]): Empty primary slots, filled before occupied ones.
 
     Returns:
         list[tuple[int, Any]]: (slot, list commission) pairs. Each chosen list commission
-            replaces a primary commission that is not chosen, blocked ones first.
+            replaces a primary commission that is not chosen, empty and blocked slots first.
     """
     free = [slot for slot in ready_slots if slot not in chosen_slots]
-    free.sort(key=lambda slot: (slot not in blocked_slots, slot))
+    free.sort(key=lambda slot: (slot not in empty_slots, slot not in blocked_slots, slot))
     if len(chosen_subs) > len(free):
         logger.warning(f'{len(chosen_subs)} list commissions chosen but only {len(free)} slots to swap into')
     return list(zip(free, chosen_subs))
@@ -171,8 +180,9 @@ class TransportItemMatcher:
     """
     Recognise item cards with the templates in assets/island/transport, resized per view.
 
-    *_2.png are 46x46 recipe icons. Unnumbered files are 73x56 crops of primary submission cards,
-    used with the card background trimmed for items without a recipe icon (Copper Ore, fish meats, Poultry).
+    *_2.png are 46x46 icons from recipe cards or item details. Unnumbered files are
+    73x56 crops of primary submission cards, used with the card background trimmed
+    for items without a recipe icon (Copper Ore, fish meats, Poultry).
     """
     FOLDER = './assets/island/transport'
     # Scales are measured on screenshots, matching gets much worse a few percent off.
@@ -281,6 +291,11 @@ class TransportItemMatcher:
         return self.item_ids.get(passed[0])
 
 
+class TransportRewards(dict):
+    """Recognised rewards, with incomplete OCR kept distinct from an empty reward."""
+    unknown = False
+
+
 class ScannedCommission:
     def __init__(self, name, slot=None, index=None):
         """
@@ -294,8 +309,10 @@ class ScannedCommission:
         self.index = index
         self.submissions = []
         self.stock = {}
-        self.rewards = {}
+        self.rewards = TransportRewards()
         self.unknown = False
+        self.empty = False
+        self.remaining = 1
 
     def __repr__(self):
         submissions = ', '.join(
@@ -323,7 +340,7 @@ class ListRow:
 
     @property
     def select_area(self):
-        """Right of the cards, clicking here selects the row without opening 詳細."""
+        """Area right of the cards that selects the row without opening item details."""
         return 760, self.top + 10, 880, self.top + 80
 
     def submission_area(self, card):
@@ -346,7 +363,6 @@ class ListRow:
 
 
 class IslandTransport(IslandExchange):
-    NEW_TEMPLATE_FOLDER = './assets/island/transport/new_templates'
     next_run_time = None
 
     @cached_property
@@ -361,10 +377,24 @@ class IslandTransport(IslandExchange):
         return 'cnocr'
 
     @cached_property
+    def transport_slot_counter_grid(self):
+        if server.server == 'jp':
+            origin, shape = (1070, 136), (29, 21)
+        elif server.server == 'en':
+            origin, shape = (1073, 136), (29, 22)
+        else:
+            origin, shape = (1074, 136), (28, 22)
+        return ButtonGrid(origin=origin, delta=(0, SLOT_DELTA), button_shape=shape,
+                          grid_shape=(1, SLOT_COUNT), name='TRANSPORT_SLOT_COUNTER')
+
+    @cached_property
     def transport_counter_ocr(self):
         # `stock/need`, blue when covered and red when short
         if server.server == 'jp':
             threshold, sub_threshold = 200, 200
+        elif server.server == 'en':
+            # 90-160 all read the '/' correctly on EN; pick the middle of that window
+            threshold, sub_threshold = 125, 110
         else:
             # cnocr, tuned on CN, which draws thinner digits
             threshold, sub_threshold = 170, 110
@@ -373,9 +403,20 @@ class IslandTransport(IslandExchange):
                                           alphabet='0123456789/IDSB', name='TRANSPORT_COUNTER_OCR')
 
     @cached_property
+    def transport_slot_counter_ocr(self):
+        # Remaining trips / limit, independent of whether Submit All is enabled.
+        return DigitCounter([], lang=self.transport_digit_lang, letter=BADGE_DARK, threshold=128,
+                            name='TRANSPORT_SLOT_COUNTER_OCR')
+
+    @cached_property
     def transport_badge_ocr(self):
-        return TransportBadgeOcr([], lang=self.transport_digit_lang, letter=(255, 255, 255), threshold=160,
-                                 name='TRANSPORT_REWARD_OCR')
+        #EN badge background artifact reads as 7 at threshold 160
+        if server.server == 'en':
+            threshold = 140
+        else:
+            threshold = 160
+        return TransportBadgeOcr([], lang=self.transport_digit_lang, letter=(255, 255, 255), threshold=threshold,
+                                name='TRANSPORT_REWARD_OCR')
 
     @cached_property
     def transport_index_ocr(self):
@@ -388,6 +429,11 @@ class IslandTransport(IslandExchange):
                         name='TRANSPORT_TIMER_OCR')
 
     @cached_property
+    def transport_refresh_timer_ocr(self):
+        return Duration(REFRESH_TIMER_AREA, lang=self.transport_digit_lang, letter=BADGE_DARK, threshold=128,
+                        name='TRANSPORT_REFRESH_TIMER_OCR')
+
+    @cached_property
     def hard_floor(self):
         return normalize_item_keys(load_hard_floor_items(
             self.config.cross_get("IslandProduction.IslandProduction.HardFloorItems", "")
@@ -396,10 +442,6 @@ class IslandTransport(IslandExchange):
     @cached_property
     def reserve(self):
         return get_menu_reserve_items(self.config)
-
-    @cached_property
-    def transport_unknown_items(self):
-        return []
 
     # Detection
 
@@ -414,19 +456,36 @@ class IslandTransport(IslandExchange):
     def slot_running(self, slot):
         return self.image_color_count(BAR_GRID[0, slot], color=BAR_ORANGE, threshold=30, count=3000)
 
-    def transport_slot_states(self):
+    def slot_empty(self, slot):
+        # The first item-card area is entirely grey only in the empty placeholder.
+        # This background is shared by the server layouts and avoids matching translated text.
+        return self.image_color_count(SUBMISSION_GRID[0, slot], color=EMPTY_GREY, threshold=12, count=5000)
+
+    def transport_slot_counters(self):
+        # DigitCounter reads one counter at a time and returns current, remain, total.
+        return [self.transport_slot_counter_ocr.ocr([crop(self.device.image, button.area)], direct_ocr=True)
+                for button in self.transport_slot_counter_grid.buttons]
+
+    def transport_slot_states(self, counters=None):
         """
         Returns:
-            list[str]: 'completed', 'ready', 'running' or 'other' (empty, locked, grey 一括受注) per slot.
+            list[str]: 'completed', 'running', 'empty', 'ready', 'exhausted' or 'other' (unreadable).
+                Empty slots still need a positive trip counter to run a new commission.
         """
+        if counters is None:
+            counters = self.transport_slot_counters()
         states = []
-        for slot in range(SLOT_COUNT):
+        for slot, (remaining, _, limit) in enumerate(counters):
             if self.slot_appear(ISLAND_TRANSPORT_CLAIM, slot):
                 states.append('completed')
-            elif self.slot_appear(ISLAND_TRANSPORT_SUBMIT, slot):
-                states.append('ready')
             elif self.slot_running(slot):
                 states.append('running')
+            elif 0 <= remaining <= limit and limit > 0 and self.slot_empty(slot):
+                states.append('empty')
+            elif 0 < remaining <= limit:
+                states.append('ready')
+            elif remaining == 0 < limit and self.slot_appear(ISLAND_TRANSPORT_SWAP, slot):
+                states.append('exhausted')
             else:
                 states.append('other')
         return states
@@ -446,62 +505,6 @@ class IslandTransport(IslandExchange):
         return False
 
     # Reading cards
-
-    def record_unknown_item(self, image, area):
-        """
-        Save a primary submission card without a template, in the format of the unnumbered templates.
-        Cards already saved are skipped.
-
-        Args:
-            image (np.ndarray): Screenshot.
-            area (tuple): Primary submission card area.
-        """
-        x, y = area[:2]
-        template = crop(image, (x + 7, y + 9, x + 80, y + 65))
-        os.makedirs(self.NEW_TEMPLATE_FOLDER, exist_ok=True)
-        for file in sorted(os.listdir(self.NEW_TEMPLATE_FOLDER)):
-            if not file.endswith('.png'):
-                continue
-            saved = load_image(os.path.join(self.NEW_TEMPLATE_FOLDER, file))
-            if saved.shape == template.shape \
-                    and cv2.matchTemplate(saved, template, cv2.TM_CCOEFF_NORMED)[0, 0] > 0.9 \
-                    and np.abs(np.subtract(cv2.mean(saved)[:3], cv2.mean(template)[:3])).max() < 15:
-                logger.info(f'Unknown transport item is already saved as {file}')
-                return
-        file = os.path.join(self.NEW_TEMPLATE_FOLDER, f'{datetime.now().strftime("%Y%m%d_%H%M%S_%f")}.png')
-        save_image(template, file)
-        logger.warning(f'Unknown transport item saved to {file}')
-        self.transport_unknown_items.append(file)
-
-    def record_unknown_reward(self, image, area, view):
-        """
-        Save an unrecognised reward card so the missing template can be added by hand.
-
-        Reward cards are drawn at CARD_SCALE[view] of the template size, so the scale
-        is written into the file name to convert the crop back to a usable template.
-
-        Args:
-            image (np.ndarray): Screenshot.
-            area (tuple): Reward card area.
-            view (str): Key of CARD_SCALE.
-        """
-        template = crop(image, area)
-        os.makedirs(self.NEW_TEMPLATE_FOLDER, exist_ok=True)
-        scale = TransportItemMatcher.CARD_SCALE[view]
-        for file in sorted(os.listdir(self.NEW_TEMPLATE_FOLDER)):
-            if not file.endswith('.png') or f'_{view}_s' not in file:
-                continue
-            saved = load_image(os.path.join(self.NEW_TEMPLATE_FOLDER, file))
-            if saved.shape == template.shape \
-                    and cv2.matchTemplate(saved, template, cv2.TM_CCOEFF_NORMED)[0, 0] > 0.9 \
-                    and np.abs(np.subtract(cv2.mean(saved)[:3], cv2.mean(template)[:3])).max() < 15:
-                logger.info(f'Unknown transport reward is already saved as {file}')
-                return
-        file = os.path.join(
-            self.NEW_TEMPLATE_FOLDER,
-            f'reward_{view}_s{scale:g}_{datetime.now().strftime("%Y%m%d_%H%M%S_%f")}.png')
-        save_image(template, file)
-        logger.info(f'Unknown transport reward saved to {file}')
 
     def read_submissions(self, cards, image=None):
         """
@@ -532,10 +535,7 @@ class IslandTransport(IslandExchange):
             current, need = adjust_counter(current, need, spilled=spilled, covered=covered)
             item_id = self.transport_item_matcher.match(image, area, view)
             if item_id is None or need <= 0:
-                if item_id is None and view == 'primary_submission':
-                    self.record_unknown_item(image, area)
-                elif item_id is None:
-                    # Recorded after swapping into a primary slot, see transport_record_list_unknown
+                if item_id is None:
                     logger.warning(f'Unknown transport item in {view}')
                 else:
                     logger.warning(f'Unable to read the counter of {DIC_ISLAND_ITEM[item_id]["name"]["en"]}')
@@ -567,22 +567,22 @@ class IslandTransport(IslandExchange):
             image = self.device.image
         present = [card for card in cards
                    if self.image_color_count(crop(image, card[1], copy=False), color=BADGE_DARK, threshold=20, count=150)]
+        rewards = TransportRewards()
         if not present:
-            return {}
+            rewards.unknown = True
+            return rewards
         counts = self.transport_badge_ocr.ocr(
             [crop(image, badge) for _, badge, _ in present], direct_ocr=True)
-        rewards = {}
         for (area, _, view), count in zip(present, counts):
             item_id = self.transport_item_matcher.match(image, area, view)
             if item_id is None:
-                # Templates come from primary submission cards only, so a reward
-                # card cannot become a template on its own. Keep the crop so the
-                # missing item can be identified and added by hand.
                 logger.info(f'Unknown transport reward item in {view} is left out')
-                self.record_unknown_reward(image, area, view)
+                rewards.unknown = True
                 continue
             if count > 0:
                 rewards[item_id] = rewards.get(item_id, 0) + count
+            else:
+                rewards.unknown = True
         return rewards
 
     # Primary slots
@@ -616,21 +616,32 @@ class IslandTransport(IslandExchange):
             rewards (bool): Whether to switch to the rewards view and read rewards.
 
         Returns:
-            tuple[list[str], dict[int, ScannedCommission]]: Slot states, ready slots.
+            tuple[list[str], dict[int, ScannedCommission]]: Slot states and idle primary slots,
+                including empty slots and occupied slots with no trips remaining.
         """
+        logger.hr('Transport scan primary slots', level=3)
         TRANSPORT_VIEW.set('content', main=self)
         self.device.screenshot()
-        states = self.transport_slot_states()
+        counters = self.transport_slot_counters()
+        states = self.transport_slot_states(counters)
         slots = {slot: ScannedCommission(f'P{slot + 1}', slot=slot)
-                 for slot, state in enumerate(states) if state == 'ready'}
+                 for slot, state in enumerate(states) if state in ('ready', 'empty', 'exhausted')}
         for slot, scanned in slots.items():
+            remaining, _, limit = counters[slot]
+            scanned.remaining = remaining if 0 <= remaining <= limit and limit > 0 else 0
+            scanned.empty = states[slot] == 'empty'
+            if scanned.empty:
+                continue
             cards = [(SUBMISSION_GRID[card, slot].area, primary_counter_area(card, slot), 'primary_submission')
                      for card in range(3)]
             scanned.submissions, scanned.stock, scanned.unknown = self.read_submissions(cards)
+            scanned.unknown |= not scanned.submissions
         if rewards and slots:
             TRANSPORT_VIEW.set('reward', main=self)
             self.device.screenshot()
             for slot, scanned in slots.items():
+                if scanned.empty:
+                    continue
                 cards = [(REWARD_GRID[card, slot].area, primary_badge_area(card, slot), 'primary_reward')
                          for card in range(3)]
                 scanned.rewards = self.read_rewards(cards)
@@ -643,7 +654,7 @@ class IslandTransport(IslandExchange):
     def transport_list_open(self, slot=None, skip_first_screenshot=True):
         """
         Args:
-            slot (int): Open with the ⇆ of this slot, or with 委託一覧を確認 if None.
+            slot (int): Open this slot's swap list, or the commission list if None.
         """
         for _ in self.loop(skip_first=skip_first_screenshot, timeout=15):
             if self.appear(ISLAND_TRANSPORT_LIST_CHECK, offset=(20, 20)):
@@ -655,6 +666,8 @@ class IslandTransport(IslandExchange):
             if slot is None:
                 if self.appear_then_click(ISLAND_TRANSPORT_LIST_ENTER, offset=(20, 20), interval=2):
                     continue
+            elif self.slot_empty(slot):
+                self.device.click(BAR_GRID[0, slot])
             elif self.slot_appear(ISLAND_TRANSPORT_SWAP, slot, interval=2):
                 self.device.click(ISLAND_TRANSPORT_SWAP)
                 continue
@@ -693,9 +706,7 @@ class IslandTransport(IslandExchange):
         The list remembers its last tab, so set it every time.
 
         Args:
-            upper (int):
-                1 for 消費確認, items to submit,
-                2 for 報酬確認, rewards
+            upper (int): 1 for required items, 2 for rewards.
         """
         return self._transport_list_side_navbar.set(self, upper=upper)
 
@@ -765,7 +776,7 @@ class IslandTransport(IslandExchange):
     def transport_list_select(self, index, skip_first_screenshot=True):
         """
         Click a visible row until it gets the selected blue mask. The click goes right of the cards,
-        clicking a card would open 詳細.
+        clicking a card would open its item details.
 
         Returns:
             list[ListRow]: Rows after selecting, None if failed.
@@ -835,8 +846,11 @@ class IslandTransport(IslandExchange):
             dict[int, Any]: See transport_list_read_page.
         """
         if not self.transport_list_side_navbar_ensure(upper=2 if rewards else 1):
-            return {}
+            return None
         rows = self.transport_list_top()
+        if not rows:
+            logger.warning('No transport list rows could be read')
+            return None
         result = {}
         for _ in range(3):
             result.update(self.transport_list_read_untinted(rows, rewards))
@@ -851,17 +865,23 @@ class IslandTransport(IslandExchange):
     def transport_scan_list(self):
         """
         Returns:
-            dict[int, ScannedCommission]: List commissions by index.
+            dict[int, ScannedCommission] | None: List commissions by index, None on a failed scan.
         """
+        logger.hr('Transport scan commission list', level=3)
         if not self.transport_list_open():
-            return {}
+            return None
+        self.transport_observe_refresh()
         submissions = self.transport_list_read_tab(rewards=False)
         rewards = self.transport_list_read_tab(rewards=True)
-        self.transport_list_close()
+        closed = self.transport_list_close()
+        if submissions is None or rewards is None or submissions.keys() != rewards.keys() or not closed:
+            logger.warning('Incomplete transport list scan')
+            return None
         subs = {}
         for index, (items, stock, unknown) in sorted(submissions.items()):
             scanned = ScannedCommission(f'{index:02d}', index=index)
             scanned.submissions, scanned.stock, scanned.unknown = items, stock, unknown
+            scanned.unknown |= not items
             scanned.rewards = rewards.get(index, {})
             subs[index] = scanned
         return subs
@@ -913,26 +933,39 @@ class IslandTransport(IslandExchange):
             for item_id, amount in stock.items()
         }
 
-    def transport_decide(self, slots, subs):
+    def transport_decide(self, slots, subs, preserve=False):
         """
+        Args:
+            preserve (bool): Choose jobs to protect in idle primaries, ignoring immediate stock.
+                Spent trips provide parking space but never submission capacity.
+
         Returns:
-            tuple[list, list]: [(slot, list commission)] swaps, [slot] to submit, or None if nothing to do.
+            tuple[list, list]: [(slot, list commission)] swaps, [slot] selected.
+                None means the board could not be valued; ([], []) is a valid empty plan.
         """
-        ready = sorted(slots)
-        if not ready:
-            logger.info('No transport slot is ready')
+        mode = 'preservation' if preserve else 'submission'
+        logger.hr(f'Transport calculate {mode} plan', level=2)
+        if subs is None:
             return None
+        ready = sorted(slot for slot, scanned in slots.items() if preserve or scanned.remaining > 0)
+        if not ready:
+            logger.info('No transport trips remain for submission')
+            return [], []
+        logger.info('Building transport production problem')
         problem = create_production_problem(self.config)
         if problem is None:
             return None
         candidates = [scanned for scanned in [slots[slot] for slot in ready] + list(subs.values())
                       if scanned.submissions and not scanned.unknown]
-        if not candidates:
-            logger.info('No transport commission can be valued')
-            return None
         effective = self.transport_effective_stock(list(slots.values()) + list(subs.values()))
+        logger.info('Solving transport production baseline')
         optimizer = TransportOptimizer(problem, max_commissions=len(ready))
-        chosen = [candidates[index] for index in optimizer.select([c.commission for c in candidates], effective)]
+        logger.info(f'Selecting transport {mode} commissions: '
+                    f'{len(candidates)} candidates, {len(ready)} slots')
+        chosen = [candidates[index] for index in optimizer.select(
+            [c.commission for c in candidates], None if preserve else effective)]
+        if not optimizer.success:
+            return None
         if not chosen:
             return [], []
         chosen_slots = [scanned.slot for scanned in chosen if scanned.slot is not None]
@@ -940,13 +973,101 @@ class IslandTransport(IslandExchange):
         blocked = [slot for slot in ready
                    if slots[slot].unknown or any(need > max(effective.get(item_id, 0), 0)
                                                  for item_id, need in slots[slot].submissions)]
-        swaps = assign_swaps(ready, chosen_slots, chosen_subs, blocked)
+        swaps = assign_swaps(ready, chosen_slots, chosen_subs, blocked,
+                             empty_slots=[slot for slot in ready if slots[slot].empty])
         submit = sorted(chosen_slots + [slot for slot, _ in swaps])
-        logger.info(f'Transport plan: swap {[(f"P{slot + 1}", sub.name) for slot, sub in swaps]}, '
-                    f'submit {[f"P{slot + 1}" for slot in submit]}')
+        logger.info(f'Transport {mode} plan: '
+                    f'swap {[(f"P{slot + 1}", sub.name) for slot, sub in swaps]}, '
+                    f'selected {[f"P{slot + 1}" for slot in submit]}')
         return swaps, submit
 
+    def transport_refresh_reason(self, states, slots, subs, plan):
+        """Return a refresh reason for unfilled primaries or trips on a recognised board."""
+        if plan is None or subs is None or len(states) != SLOT_COUNT \
+                or any(state in ('other', 'completed') for state in states):
+            return None
+        for scanned in list(slots.values()) + list(subs.values()):
+            if not scanned.empty and (scanned.unknown or not scanned.submissions
+                                      or not scanned.rewards or getattr(scanned.rewards, 'unknown', False)):
+                logger.info('Skip transport refresh with incomplete commission recognition')
+                return None
+        selected = {slot for slot, _ in plan[0]}
+        if any(scanned.empty and slot not in selected for slot, scanned in slots.items()):
+            return 'Empty primary slots can be filled regardless of remaining trips'
+        capacity = sum(scanned.remaining > 0 for scanned in slots.values())
+        if len(plan[1]) < capacity:
+            return 'Profitable, stocked commissions do not fill the remaining trips'
+        return None
+
     # Actions
+
+    def transport_refresh_status(self):
+        """Read the list refresh control: ready, cooldown with remaining duration, or unknown."""
+        if self.match_template_color(ISLAND_TRANSPORT_LIST_REFRESH, offset=(5, 5)):
+            return 'ready', None
+        if self.match_template_color(ISLAND_TRANSPORT_LIST_REFRESH_COOLDOWN, offset=(5, 5)):
+            remain = self.transport_refresh_timer_ocr.ocr(self.device.image)
+            if timedelta(0) < remain <= REFRESH_COOLDOWN:
+                return 'cooldown', remain
+        return 'unknown', None
+
+    def transport_observe_refresh(self):
+        """Remember the observed availability without writing config during a scan."""
+        state, remain = self.transport_refresh_status()
+        now = datetime.now()
+        self.transport_refresh_time = (now + remain + timedelta(seconds=3) if state == 'cooldown'
+                                       else now if state == 'ready' else None)
+        return state
+
+    def transport_load_refresh_time(self):
+        value = self.config.cross_get(REFRESH_STORAGE, default='')
+        try:
+            return datetime.fromisoformat(value) if value else None
+        except (TypeError, ValueError):
+            logger.warning('Invalid saved transport refresh time')
+            return None
+
+    def transport_save_refresh_time(self, target):
+        self.config.cross_set(REFRESH_STORAGE, target.isoformat(sep=' ') if target is not None else '')
+
+    def transport_refresh_list(self):
+        """
+        Manually refresh list jobs and fill empty primaries, leaving occupied primaries intact.
+
+        The game enforces a four-hour cooldown. Require the enabled control before clicking,
+        then verify the cooldown appeared before reporting success. Rescan trip counters afterward.
+
+        Returns:
+            bool: Refresh verified and the primary view restored.
+        """
+        logger.hr('Transport refresh list', level=2)
+        if not self.transport_list_open():
+            return False
+        state = self.transport_observe_refresh()
+        if state != 'ready':
+            if self.transport_refresh_time is not None:
+                self.transport_save_refresh_time(self.transport_refresh_time)
+            self.transport_list_close()
+            return False
+
+        self.device.click(ISLAND_TRANSPORT_LIST_REFRESH)
+        # Retain the cooldown even if navigation fails after the game accepts the action.
+        self.transport_save_refresh_time(datetime.now() + REFRESH_COOLDOWN)
+        for _ in self.loop(skip_first=False, timeout=15):
+            if self.handle_island_popup_confirm('TRANSPORT_REFRESH'):
+                continue
+            if self.handle_transport_popup():
+                continue
+            if self.appear(ISLAND_TRANSPORT_LIST_CHECK, offset=(20, 20)):
+                if self.transport_observe_refresh() == 'cooldown':
+                    self.transport_save_refresh_time(self.transport_refresh_time)
+                    return self.transport_list_close()
+            elif self.is_in_transport_main():
+                if not self.transport_list_open():
+                    break
+        logger.warning('Transport refresh could not be verified')
+        self.transport_list_close()
+        return False
 
     def transport_list_locate(self, sub):
         """
@@ -963,7 +1084,7 @@ class IslandTransport(IslandExchange):
                     items, _, _ = self.transport_list_read_selected(row, rewards=False)[row.index]
                 else:
                     items, _, _ = self.transport_list_read_page([row], rewards=False)[row.index]
-                if sorted(item_id for item_id, _ in items) != sorted(item_id for item_id, _ in sub.submissions):
+                if sorted(items) != sorted(sub.submissions):
                     logger.warning(f'List commission {sub.name} changed, now submits {items}')
                     return False
                 return True
@@ -978,8 +1099,8 @@ class IslandTransport(IslandExchange):
 
     def transport_swap(self, slot, sub):
         """
-        Replace the primary commission of a slot with a list commission, the old one disappears.
-        ⇆ -> list -> select row -> 確定 -> popup 新しい委託に更新しますか？ -> 確定
+        Replace a slot's primary commission with a list commission, discarding the old one.
+        Select a row in the slot's swap list, then confirm the selection and replacement prompt.
 
         Args:
             slot (int):
@@ -988,9 +1109,10 @@ class IslandTransport(IslandExchange):
         Returns:
             bool: If swap confirmed.
         """
-        logger.hr(f'Transport swap P{slot + 1} <- {sub.name}', level=2)
+        logger.hr(f'Transport swap P{slot + 1} <- {sub.name}', level=3)
         TRANSPORT_VIEW.set('content', main=self)
-        if not self.slot_appear(ISLAND_TRANSPORT_SWAP, slot):
+        empty = self.slot_empty(slot)
+        if not empty and not self.slot_appear(ISLAND_TRANSPORT_SWAP, slot):
             logger.warning(f'No swap button on P{slot + 1}')
             return False
         if not self.transport_list_open(slot=slot):
@@ -1002,8 +1124,9 @@ class IslandTransport(IslandExchange):
             return False
 
         confirmed = False
+        selected = False
         for _ in self.loop(timeout=15):
-            if confirmed and self.is_in_transport_main():
+            if (confirmed or empty and selected) and self.is_in_transport_main():
                 return True
             if self.handle_island_popup_confirm('TRANSPORT_SWAP'):
                 confirmed = True
@@ -1015,19 +1138,49 @@ class IslandTransport(IslandExchange):
                 if self.appear_then_click(ISLAND_TRANSPORT_LIST_BACK, offset=(20, 20), interval=2):
                     continue
             elif self.appear_then_click(ISLAND_TRANSPORT_LIST_CONFIRM, offset=(20, 20), interval=2):
+                selected = True
                 continue
         logger.warning('Transport swap timeout')
+        self.transport_list_close()
         return False
+
+    def transport_execute_plan(self, plan, submit=True):
+        """Apply and verify swaps, then submit; return (any submitted, all actions succeeded)."""
+        swaps, selected = plan
+        if swaps:
+            logger.hr('Transport swap commissions', level=2)
+        for slot, sub in swaps:
+            if not self.transport_swap(slot, sub):
+                return False, False
+        if swaps:
+            _, rescanned = self.transport_scan_slots()
+            for slot, sub in swaps:
+                scanned = rescanned.get(slot)
+                if scanned is None or scanned.unknown or sorted(scanned.submissions) != sorted(sub.submissions) \
+                        or scanned.rewards != sub.rewards:
+                    logger.warning(f'P{slot + 1} does not hold {sub.name} after swapping')
+                    return False, False
+                if submit and scanned.remaining <= 0:
+                    logger.warning(f'P{slot + 1} has no remaining trips after selecting a commission')
+                    return False, False
+        submitted = False
+        if submit:
+            if selected:
+                logger.hr('Transport submit commissions', level=2)
+            for slot in selected:
+                if not self.transport_submit(slot):
+                    return submitted, False
+                submitted = True
+        return submitted, True
 
     def transport_submit(self, slot, skip_first_screenshot=True):
         """
-        Load every item of a slot with 一括受注, which may be followed by island get items, several times,
-        and island level up.
+        Submit all required items for a slot, handling item rewards and island level-up popups.
 
         Returns:
             bool: If the slot started running.
         """
-        logger.hr(f'Transport submit P{slot + 1}', level=2)
+        logger.hr(f'Transport submit P{slot + 1}', level=3)
         TRANSPORT_VIEW.set('content', main=self)
         confirm = Timer(2, count=4).start()
         for _ in self.loop(skip_first=skip_first_screenshot, timeout=30):
@@ -1051,7 +1204,8 @@ class IslandTransport(IslandExchange):
     def transport_next_run_time(self):
         """
         Returns:
-            datetime: When the first running transport finishes, None if none is running.
+            datetime: When all running transports finish, so rewards can be collected in one visit.
+                None if none is running or no timer can be read.
         """
         TRANSPORT_VIEW.set('content', main=self)
         self.device.screenshot()
@@ -1065,82 +1219,96 @@ class IslandTransport(IslandExchange):
             return None
         return datetime.now() + max(remains)
 
-    def transport_record_list_unknown(self, slots, subs, used):
-        """
-        Items without a template are only recorded on primary submission cards, so swap list commissions
-        having them into ready slots not used in this run, and read those slots.
-
-        Args:
-            slots (dict[int, ScannedCommission]): Ready slots.
-            subs (dict[int, ScannedCommission]): List commissions.
-            used (list[int]): Slots swapped or submitted in this run.
-        """
-        unknown = [sub for sub in subs.values() if sub.unknown]
-        if not unknown:
-            return
-        # Primary commissions with unknown items are recorded already and can't be valued, replace them first
-        free = sorted((slot for slot in slots if slot not in used), key=lambda slot: (not slots[slot].unknown, slot))
-        if not free:
-            logger.info(f'No free slot to read the unknown items of {[sub.name for sub in unknown]}')
-            return
-        swapped = [slot for slot, sub in zip(free, unknown) if self.transport_swap(slot, sub)]
-        if swapped:
-            self.transport_scan_slots(rewards=False)
-
-    def transport_notify_unknown(self):
-        if not self.transport_unknown_items:
-            return
-        from module.notify import handle_notify
-        handle_notify(
-            self.config.Error_OnePushConfig,
-            title=f'Alas <{self.config.config_name}> island transport',
-            content=f'<{self.config.config_name}> found {len(self.transport_unknown_items)} unknown transport '
-                    f'item(s), saved to ' + ', '.join(self.transport_unknown_items),
-        )
+    def transport_scan_board(self, exchange=True):
+        """Read idle primaries and the list even when trips are spent; exchange fish for usable trips."""
+        logger.hr('Transport scan commissions', level=2)
+        states, slots = self.transport_scan_slots()
+        capacity = sum(scanned.remaining > 0 for scanned in slots.values())
+        subs = self.transport_scan_list() if slots else {}
+        if exchange and capacity and subs is not None and self.needs_fish_meat(
+                list(slots.values()) + list(subs.values()), max_commissions=capacity):
+            self.transport_exchange_fish_meat()
+            return self.transport_scan_board(exchange=False)
+        for scanned in list(slots.values()) + list((subs or {}).values()):
+            logger.info(f'Transport {scanned}')
+        return states, slots, subs
 
     def run(self, dry_run=False):
         """
         Args:
-            dry_run (bool): Scan and decide only, no swap or submit.
+            dry_run (bool): Scan and decide only, without claiming, exchanging, swapping or refreshing.
 
         Returns:
-            datetime: When the first running transport finishes, None if none is running.
+            datetime: Next batch collection, needed refresh or retry, or None for the next server reset.
         """
         if not self.server_support_island_transport():
             logger.info('Island transport is not available on this server')
             self.config.task_delay(server_update=True)
+            return None
         self.ui_ensure(page_island_transport)
-        self.transport_claim_rewards()
-        _, slots = self.transport_scan_slots()
-        # Nothing can be submitted or swapped without a ready slot
-        subs = self.transport_scan_list() if slots else {}
-        if self.needs_fish_meat(list(slots.values()) + list(subs.values()), max_commissions=len(slots)):
-            self.transport_exchange_fish_meat()
-            _, slots = self.transport_scan_slots()
-            subs = self.transport_scan_list() if slots else {}
-        for scanned in list(slots.values()) + list(subs.values()):
-            logger.info(f'Transport {scanned}')
-
-        plan = self.transport_decide(slots, subs)
+        claimed = dry_run or self.transport_claim_rewards()
         submitted = False
-        if not dry_run:
-            swaps, submit = plan if plan is not None else ([], [])
-            used = [slot for slot, _ in swaps] + submit
-            for slot, sub in swaps:
-                if not self.transport_swap(slot, sub):
-                    submit.remove(slot)
-            if swaps:
-                _, rescanned = self.transport_scan_slots(rewards=False)
-                for slot, sub in swaps:
-                    items = rescanned[slot].submissions if slot in rescanned else []
-                    if slot in submit and sorted(items) != sorted(sub.submissions):
-                        logger.warning(f'P{slot + 1} does not hold {sub.name} after swapping, skip submitting')
-                        submit.remove(slot)
-            for slot in submit:
-                submitted = self.transport_submit(slot) or submitted
-            self.transport_record_list_unknown(slots, subs, used)
-        self.transport_notify_unknown()
-        self.next_run_time = self.transport_next_run_time()
+        failed = not claimed
+        refresh_at = None
+        # One initial pass, then at most one pass over the refreshed board.
+        for cycle in range(2):
+            states, slots, subs = self.transport_scan_board(exchange=not dry_run and claimed)
+            plan = self.transport_decide(slots, subs)
+            reason = self.transport_refresh_reason(states, slots, subs, plan)
+            if dry_run or not claimed or plan is None:
+                break
+            started, success = self.transport_execute_plan(plan)
+            submitted |= started
+            if not success:
+                failed = True
+                break
+            if reason is None:
+                break
+
+            if plan[0] or plan[1]:
+                # Swaps change list membership; submissions consume stock. Park from a fresh scan.
+                states, slots = self.transport_scan_slots()
+                selected = {sub.index for _, sub in plan[0]}
+                subs = {index: sub for index, sub in subs.items() if index not in selected}
+                if subs:
+                    subs = self.transport_scan_list()
+            if self.transport_refresh_reason(states, slots, subs, ([], [])) is None:
+                break
+            preservation = self.transport_decide(slots, subs, preserve=True)
+            if preservation is None:
+                break
+            _, success = self.transport_execute_plan(preservation, submit=False)
+            if not success:
+                failed = True
+                break
+            if preservation[0]:
+                states, slots = self.transport_scan_slots()
+                # Selecting a list job removes that index and does not consume stock.
+                parked = {sub.index for _, sub in preservation[0]}
+                subs = {index: sub for index, sub in subs.items() if index not in parked}
+            reason = self.transport_refresh_reason(states, slots, subs, ([], []))
+            if reason is None:
+                break
+
+            refresh_at = getattr(self, 'transport_refresh_time', None)
+            if refresh_at is not None:
+                self.transport_save_refresh_time(refresh_at)
+            else:
+                refresh_at = self.transport_load_refresh_time()
+            if cycle or refresh_at is not None and refresh_at > datetime.now():
+                break
+
+            logger.info(f'Transport refresh requested: {reason}')
+            if not self.transport_refresh_list():
+                failed = True
+                refresh_at = self.transport_load_refresh_time()
+                break
+
+        targets = [self.transport_next_run_time(), refresh_at]
+        if failed:
+            targets.append(datetime.now() + REFRESH_RETRY)
+        targets = [target for target in targets if target is not None and target > datetime.now()]
+        self.next_run_time = min(targets) if targets else None
         logger.info(f'Transport next run time: {self.next_run_time}')
         if self.next_run_time is not None:
             self.config.task_delay(target=self.next_run_time, server_update=True)
@@ -1152,4 +1320,4 @@ class IslandTransport(IslandExchange):
         return self.next_run_time
 
     def server_support_island_transport(self):
-        return self.config.SERVER in ['jp']
+        return self.config.SERVER in ['cn', 'jp', 'en']
