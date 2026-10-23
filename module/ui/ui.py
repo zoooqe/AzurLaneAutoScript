@@ -22,6 +22,12 @@ from module.ui.page import Page, page_academy, page_campaign, page_event, page_m
 from module.ui_white.assets import *
 
 
+# How many times ui_get_current_page clicks the top-left back arrow to leave an
+# unknown page before asking the user to switch pages by hand. Island screens
+# nest at most three deep, so six is already generous.
+UNKNOWN_PAGE_BACK_LIMIT = 6
+
+
 class UI(InfoHandler):
     ui_current: Page
 
@@ -177,6 +183,8 @@ class UI(InfoHandler):
         orientation_timer = Timer(5)
 
         timeout = Timer(10, count=20).start()
+        # Bounded so an unknown page with an unclickable arrow cannot loop forever.
+        unknown_back = 0
         while 1:
             if skip_first_screenshot:
                 skip_first_screenshot = False
@@ -209,12 +217,28 @@ class UI(InfoHandler):
             if self.appear_then_click(RPG_HOME, offset=(30, 30), interval=2):
                 timeout.reset()
                 continue
+            # Island sub pages, e.g. the production detail with the product list
+            # or the character picking screen, only carry a back arrow at the
+            # top-left and no HOME button. Stopping a task in the middle of a
+            # production run leaves the game there, so the next start used to die
+            # with "Please switch to a supported page before starting Alas".
+            if unknown_back < UNKNOWN_PAGE_BACK_LIMIT \
+                    and self.appear_then_click(BACK_ARROW_WHITE, offset=(30, 30), interval=2):
+                unknown_back += 1
+                logger.info(f'UI get current page: {BACK_ARROW_WHITE} -> previous page')
+                timeout.reset()
+                continue
             if self.ui_additional():
                 timeout.reset()
                 continue
 
             app_check()
             minicap_check()
+
+            if unknown_back >= UNKNOWN_PAGE_BACK_LIMIT:
+                logger.warning(f'Clicked {BACK_ARROW_WHITE} {unknown_back} times, still on an unknown page')
+                break
+
             # continuously check rotation
             if orientation_timer.reached():
                 self.device.get_orientation()
