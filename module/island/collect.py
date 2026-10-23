@@ -1,10 +1,8 @@
 from module.base.button import ButtonGrid
-from module.base.decorator import del_cached_property
 from module.base.timer import Timer
 from module.exception import GameStuckError
 from module.island.assets import *
 from module.island_handler.dock import IslandDock
-from module.island_handler.dock_scanner import CharacterScanner
 from module.logger import logger
 from module.ui.page import page_island_manage, page_island_phone
 
@@ -12,39 +10,12 @@ ISLAND_COLLECT_WORKSLOT_GRID = ButtonGrid(
     origin=(832, 227), delta=(95, 0), button_shape=(74, 74), grid_shape=(3, 1)
 )
 
-# Adaptability grade read from the dock card by GradeScanner, best first.
-# Unknown grades (OCR miss) go last so a readable card always wins.
-GRADE_PRIORITY = {'S': 0, 'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5}
-GRADE_UNKNOWN = len(GRADE_PRIORITY)
-
-# The game refuses to start a round when a crew member has less emotion than
-# this and the start button simply does nothing, which used to end as a
-# GameTooManyClickError and three failed rounds in a row.  Observed:
-# 2026-10-23 emotion 100 started fine, 2026-10-25 emotion 86 left the button
-# dead, 2026-10-25 emotion 121 started fine.
-COLLECT_MIN_EMOTION = 100
 # Give up instead of letting Device.click_record_check() declare a game stuck.
 # It fires at 12 clicks on one button or 6 on each of two buttons, so stay below
-# both: a working round needs two or three clicks.
+# both: a working round needs two or three clicks, five means the button is dead.
+# Observed on 2026-10-25: a crew member with emotion 86 left the start button
+# unresponsive, which used to end the task with a human takeover request.
 COLLECT_START_CLICK_LIMIT = 5
-
-
-def grade_priority(character):
-    return GRADE_PRIORITY.get(character.grade, GRADE_UNKNOWN)
-
-
-def collect_priority(character):
-    """Best crew first: enough emotion, then adaptability, then emotion.
-
-    Adaptability decides the output, but a tired character cannot start at all,
-    so emotion has to gate the sort before the grade.
-    """
-    emotion = character.emotion or 0
-    return (
-        0 if emotion >= COLLECT_MIN_EMOTION else 1,
-        grade_priority(character),
-        -emotion,
-    )
 
 
 class IslandCollect(IslandDock):
@@ -117,38 +88,12 @@ class IslandCollect(IslandDock):
             else:
                 logger.warning(f'Failed to click workslot button for workslot {workslot}')
                 return False
-            self.island_dock_sort_method_dsc_set(enable=False, wait_loading=True)
-            del_cached_property(self, 'dock_grid')
-            scanner = CharacterScanner(self.dock_grid, emotion=(80, 150), status='free')
-            scanner.disable('emotion_limit')
-            for _ in self.loop(timeout=3):
-                candidates = scanner.scan(self.device.image)
-                if not candidates:
-                    continue
-                if any(candidate.identity == 'unknown' for candidate in candidates):
-                    continue
-                break
-            if not candidates:
+            if not self.island_dock_select_character(
+                    emotion=(80, 150), descending=False,
+                    disabled=('emotion_limit',)):
                 logger.warning(f'No candidate found for workslot {workslot}, canceling collect')
                 self.island_dock_quit()
                 return False
-            # Collect output scales with adaptability, so spend the best grade first.
-            candidates.sort(key=collect_priority)
-            logger.info(
-                f'Collect candidates for workslot {workslot}: '
-                + ', '.join(
-                    f'{candidate.identity}({candidate.grade or "unknown"}, '
-                    f'emotion {candidate.emotion})'
-                    for candidate in candidates
-                )
-            )
-            if candidates[0].emotion < COLLECT_MIN_EMOTION:
-                logger.warning(
-                    f'Best candidate {candidates[0].identity} has only '
-                    f'{candidates[0].emotion} emotion, the game may refuse to start'
-                )
-            button = candidates[0].button
-            self.island_dock_select_one(button)
             self.island_dock_select_confirm(check_button=[ISLAND_COLLECT_START, ISLAND_COLLECT_START_UNAVAILABLE])
             if self.match_template_color(ISLAND_COLLECT_START, offset=(20, 20)):
                 break
@@ -162,9 +107,8 @@ class IslandCollect(IslandDock):
                 confirm_timer.reset()
                 continue
             if self.match_template_color(ISLAND_COLLECT_START, offset=(20, 20)):
-                # A crew short of emotion leaves the button dead.  Stop before
-                # Device.click_record_check() turns it into a game restart and
-                # the task ends up requesting a human takeover.
+                # A crew short of emotion leaves the button dead; stop before
+                # Device.click_record_check() turns it into a game restart.
                 if click_count >= COLLECT_START_CLICK_LIMIT:
                     logger.warning(
                         'Collect start button is not responding, the selected '
@@ -192,6 +136,7 @@ class IslandCollect(IslandDock):
             success = self.collect_execute()
             if success:
                 logger.info('Collect successfully')
+                self.config.cross_set('IslandProduction.Storage.Storage.CheckAllEmptySlots', True)
                 self.config.task_delay(server_update=True)
             else:
                 logger.warning('Failed to collect, will retry later')

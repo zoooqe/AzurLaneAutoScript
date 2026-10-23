@@ -455,6 +455,7 @@ class GeneratedConfig:
     IslandProduction_BedtimeEnable = False
     IslandProduction_BedtimeTime = '00:00'
     IslandProduction_BedtimeHours = 8
+    IslandProduction_UseWorkerjuuByDefault = True
 
     # Group `IslandOrder`
     IslandOrder_StuckSeasonOrderId = 0
@@ -463,9 +464,6 @@ class GeneratedConfig:
     IslandFreebie_Share = True
 
     # Group `IslandRestaurant`
-    IslandRestaurant_WaitressLock = True
-    IslandRestaurant_StrictWaitress = False
-    IslandRestaurant_WaitForFullMenu = True
     IslandRestaurant_KoiGrade = 'bronze'  # bronze, silver, gold, diamond
     IslandRestaurant_KoiWaitress1 = 'any'  # none, any, Chao_Ho, Chang_Feng
     IslandRestaurant_KoiWaitress2 = 'none'  # none, any, Chao_Ho, Chang_Feng

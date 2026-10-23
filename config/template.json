@@ -1953,7 +1953,8 @@
       "SkipBufferSurplus": true,
       "BedtimeEnable": false,
       "BedtimeTime": "00:00",
-      "BedtimeHours": 8
+      "BedtimeHours": 8,
+      "UseWorkerjuuByDefault": true
     },
     "Storage": {
       "Storage": {}
@@ -2043,9 +2044,6 @@
       "ServerUpdate": "00:00"
     },
     "IslandRestaurant": {
-      "WaitressLock": true,
-      "StrictWaitress": false,
-      "WaitForFullMenu": true,
       "KoiGrade": "bronze",
       "KoiWaitress1": "any",
       "KoiWaitress2": "none",

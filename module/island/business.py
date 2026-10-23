@@ -6,13 +6,7 @@ from module.config.utils import get_server_next_update
 from module.island.assets import *
 from module.island.utils import production_place_name_with_id
 from module.island_handler.assets import ISLAND_RESTAURANT_ANIMATION_CHECK
-from module.island_handler.restaurant import (
-    IslandRestaurant,
-    MenuIncomplete,
-    WaitressLocked,
-    WaitressOccupied,
-    WaitressUnavailable,
-)
+from module.island_handler.restaurant import IslandRestaurant
 from module.island_handler.restaurant_config import (
     RESTAURANT_IDS,
     get_waitress_slots,
@@ -135,49 +129,11 @@ class IslandBusiness(IslandRestaurant):
         elif self.index >= len(self.business_grid_shifted.buttons) and self.shifted:
             logger.info("No more restaurants")
 
-    def prefetch_restaurant_states(self):
-        """Read the state and the finish time of every restaurant before dispatching.
-
-        The waitress lock has to know whether a restaurant sharing a waitress is
-        still running today (and when it ends), and that restaurant may be listed
-        after the current one.
-        """
-        states = {}
-        finish_times = {}
-        self.restaurant_swipe_to_top()
-        seen = set()
-        while len(seen) < len(RESTAURANT_IDS):
-            button = self.current_restaurant_button()
-            if button is None:
-                break
-            restaurant_id = self.get_restaurant_id(button)
-            if restaurant_id is not None and restaurant_id not in seen:
-                seen.add(restaurant_id)
-                entrance_button = button.crop(BUSINESS_ENTRANCE_AREA)
-                if self.is_restaurant_running(entrance_button):
-                    states[restaurant_id] = 'running'
-                    finish_times[restaurant_id] = datetime.now() + self.get_remain_time(button)
-                elif self.is_restaurant_resting(entrance_button):
-                    states[restaurant_id] = 'resting'
-                else:
-                    states[restaurant_id] = 'ready'
-            self.next_restaurant()
-        self.restaurant_swipe_to_top()
-        if finish_times:
-            logger.info(
-                "Running restaurants: " + ", ".join(
-                    f"{production_place_name_with_id(restaurant_id)} until {finish_time}"
-                    for restaurant_id, finish_time in sorted(finish_times.items())
-                )
-            )
-        return states, finish_times
-
     def run(self):
         self.ui_ensure(page_island_manage)
         self.island_manage_side_navbar_ensure(upper=2)
         self.handle_restaurant_popup()
         self.restaurant_swipe_to_top()
-        self.restaurant_states, self.restaurant_finish_times = self.prefetch_restaurant_states()
         unchecked_restaurants = list(RESTAURANT_IDS)
         next_run_time = {
             601: get_server_next_update('00:00') if not self.skip_restaurant[601] else datetime.now() + timedelta(days=3),
@@ -210,21 +166,16 @@ class IslandBusiness(IslandRestaurant):
             if self.is_restaurant_running(entrance_button):
                 remain_time = self.get_remain_time(button)
                 next_run_time[restaurant_id] = datetime.now() + remain_time
-                self.restaurant_finish_times[restaurant_id] = next_run_time[restaurant_id]
-                self.restaurant_states[restaurant_id] = 'running'
                 logger.info(f"Restaurant {restaurant} is running, remaining time: {remain_time}")
                 unchecked_restaurants.remove(restaurant_id)
                 self.next_restaurant()
                 continue
             if self.is_restaurant_resting(entrance_button):
                 logger.info(f"Restaurant {restaurant} is resting")
-                self.restaurant_states[restaurant_id] = 'resting'
                 unchecked_restaurants.remove(restaurant_id)
                 self.next_restaurant()
                 continue
             logger.info(f"Restaurant {restaurant} is ready")
-            self.restaurant_states[restaurant_id] = 'ready'
-            self.restaurant_finish_times.pop(restaurant_id, None)
             for _ in self.loop():
                 if self.appear(page_island_manage.check_button, offset=(20, 20), interval=1):
                     self.device.click(entrance_button)
@@ -232,36 +183,12 @@ class IslandBusiness(IslandRestaurant):
                 if self.appear(ISLAND_RESTAURANT_ANIMATION_CHECK, offset=(-170, -20, 20, 20)):  # 20261016, slow animation for loading restaurants
                     break
             self.working_restaurant_id = restaurant_id
-            try:
-                success = super().run()
-            except MenuIncomplete as e:
-                # Part of the menu is still being produced, come back later
-                # instead of opening with a partial menu.
-                logger.info(f"{e}, retry this restaurant in 1 hour")
-                next_run_time[restaurant_id] = datetime.now() + timedelta(hours=1)
-                unchecked_restaurants.remove(restaurant_id)
-                success = False
-            except WaitressOccupied as e:
-                logger.warning(e)
-                next_run_time[restaurant_id] = datetime.now() + timedelta(hours=8)
-                unchecked_restaurants.remove(restaurant_id)
-                success = False
-            except WaitressUnavailable as e:
-                # Strict waitress mode: running with a substitute would put
-                # someone the user did not pick on a slot, so skip this round.
-                logger.warning(f"{e}, retry this restaurant in 1 hour")
-                next_run_time[restaurant_id] = datetime.now() + timedelta(hours=1)
-                unchecked_restaurants.remove(restaurant_id)
-                success = False
-            except WaitressLocked as e:
-                # Both restaurants still want a shift today and her current one
-                # ends in time, so run this restaurant right after she is free.
-                # A shift that crosses 00:00 is waited out as well: opening now
-                # would only burn a late-night round.
-                logger.info(f"{e}, will start this restaurant when she is free")
-                next_run_time[restaurant_id] = e.finish_time + timedelta(minutes=1)
-                unchecked_restaurants.remove(restaurant_id)
-                success = False
+            self.waitress_occupied = False
+            success = super().run()
+            if not success and self.waitress_occupied:
+                next_run_time[restaurant_id] = min(
+                    next_run_time[restaurant_id], datetime.now() + timedelta(hours=8))
+                logger.info(f"Required waitress occupied, retry restaurant {restaurant} at {next_run_time[restaurant_id]}")
             self.ui_back(page_island_manage.check_button)
             for _ in self.loop(timeout=0.8, skip_first=False):
                 if self.appear(page_island_manage.check_button, offset=(0, 20)):
@@ -275,8 +202,6 @@ class IslandBusiness(IslandRestaurant):
                 unchecked_restaurants.remove(restaurant_id)
             if success:
                 next_run_time[restaurant_id] = datetime.now() + timedelta(hours=8)
-                self.restaurant_finish_times[restaurant_id] = next_run_time[restaurant_id]
-                self.restaurant_states[restaurant_id] = 'running'
                 # Since dealt restaurants will be moved to the bottom,
                 # we can directly check the next one without swiping
         self.config.task_delay(target=min(next_run_time.values()))

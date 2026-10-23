@@ -2689,6 +2689,10 @@
     "BedtimeHours": {
       "name": "Bedtime fill hours",
       "help": "Hours of production to queue in every slot, and also the length of the\nbedtime window. Default 8."
+    },
+    "UseWorkerjuuByDefault": {
+      "name": "Use Workerjuu by default",
+      "help": "Enabled: use Workerjuu by default. Disabled: search free characters in ascending dock order with at least 100 emotion and an emotion limit below 150, excluding explicitly configured named restaurant waitresses; use Workerjuu if none is available."
     }
   },
   "IslandOrder": {
@@ -2715,18 +2719,6 @@
     "_info": {
       "name": "Restaurant Management",
       "help": ""
-    },
-    "WaitressLock": {
-      "name": "Lock Waitresses",
-      "help": "Applies when the same waitress is assigned to several restaurants: if she is working in another restaurant and both restaurants still need a shift today and another shift still fits after she finishes, wait for her shift to end before opening this one; if it does not fit, replace her. If her other restaurant is resting (not doing business today), pick her as usual. A shift that crosses 00:00 is always waited out instead of opening a late-night round."
-    },
-    "StrictWaitress": {
-      "name": "Strict waitress",
-      "help": "Open only when every configured waitress is on duty. If any of them is working elsewhere or her state cannot be confirmed, skip this round and retry in 1 hour instead of picking a substitute. Slots set to any are not affected."
-    },
-    "WaitForFullMenu": {
-      "name": "Wait for Full Menu",
-      "help": "Check the configured menu before opening: every dish that can take a shelf needs enough stock for a full round, otherwise skip this round and retry in 1 hour instead of substituting other items. Dishes beyond the shelf count are not sold this round, so their shortage does not delay the round. When off, missing dishes are topped up with other sellable items (old behaviour)."
     },
     "KoiGrade": {
       "name": "Golden Koi Restaurant Grade",

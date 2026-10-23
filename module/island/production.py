@@ -9,12 +9,16 @@ from module.island.assets import *
 from module.island.data import DIC_ISLAND_PRODUCTION_PLACE, DIC_ISLAND_RECIPE, DIC_ISLAND_SLOT
 from module.island.utils import get_bedtime_window, item_name_with_id, production_place_name_with_id
 from module.island_handler.dock import IslandDock
-from module.island_handler.dock_scanner import CharacterScanner
 from module.island_handler.exchange import FISH_MEAT_SOURCES
 from module.island_handler.recipe import (
     IslandProductionRestart,
     IslandRecipe,
     get_recipe_product_id,
+)
+from module.island_handler.restaurant_config import (
+    RESTAURANT_IDS,
+    get_selected_named_waitresses,
+    get_waitress_slots,
 )
 from module.logger import logger
 from module.map_detection.utils import Points
@@ -40,6 +44,8 @@ def production_slot_name_with_id(slot_id):
 
 class IslandProduction(IslandRecipe, IslandDock):
     slot_finish_time = {}
+    human_workers_available = True
+    _first_run = True
     # main menu related methods
     def _get_tabs(self):
         area = (DETECT_AREA[0] + ANCHOR_AREA[0], DETECT_AREA[1] + ANCHOR_AREA[1], DETECT_AREA[2] - TAB_SIZE[0] + ANCHOR_AREA[2], DETECT_AREA[3] - TAB_SIZE[1] + ANCHOR_AREA[3])
@@ -299,7 +305,7 @@ class IslandProduction(IslandRecipe, IslandDock):
                 )
             )
 
-    def dispatch_slot(self, slot_id, slot_button, worker='manjuu'):
+    def dispatch_slot(self, slot_id, slot_button):
         if slot_id in DIC_ISLAND_PRODUCTION_PLACE[102]['slot']:
             del_cached_property(super(), 'recipe_id_sequence')
             del_cached_property(super(), 'all_recipe_stocks')
@@ -311,21 +317,31 @@ class IslandProduction(IslandRecipe, IslandDock):
             if self.match_template_color(page_island_manage.check_button, interval=1) and not self.is_enter_window_shown():
                 self.device.click(slot_button)
                 continue
-        if worker != 'manjuu':
-            character = self.island_dock_find_character(worker)
-            if not character or character.status != 'free':
+        if self.config.IslandProduction_UseWorkerjuuByDefault or not self.human_workers_available:
+            worker = self.island_dock_select_workerjuu()
+        else:
+            blacklist = set()
+            for restaurant_id in RESTAURANT_IDS:
+                blacklist.update(get_selected_named_waitresses(get_waitress_slots(self.config, restaurant_id)))
+            worker = self.island_dock_select_character(
+                emotion=(100, 150), emotion_limit=(100, 149),
+                blacklist=blacklist, descending=False)
+            if not worker:
+                self.device.click_record_remove('ISLAND_DOCK_NEXT_PAGE_SWIPE')
+                self.human_workers_available = False
                 logger.warning(
-                    f'Failed to select character {worker} for '
-                    f'{production_slot_name_with_id(slot_id)}, try to select manjuu instead'
+                    f'No available character for {production_slot_name_with_id(slot_id)}, '
+                    'use Workerjuu for the remaining production slots'
                 )
-                worker = 'manjuu'
-                self.ensure_dock_page_at_top()
-            else:
-                self.island_dock_select_one(character.button)
-        if worker == 'manjuu':
-            self.island_dock_select_manjuu()
+                worker = self.island_dock_select_workerjuu(descending=True)
+        if not worker:
+            logger.warning(f'Failed to select a worker for {production_slot_name_with_id(slot_id)}')
+            self.island_dock_quit()
+            return False
+        emotion = float('inf') if worker.identity == 'Workerjuu' else worker.emotion
+        logger.attr('Worker emotion', emotion)
         self.island_dock_select_confirm(self.is_in_recipe_menu)
-        target_time = super().run(slot_id=slot_id)
+        target_time = super().run(slot_id=slot_id, emotion=emotion)
         if target_time is not None:
             target_time = target_time.replace(microsecond=0)
             self.slot_finish_time[slot_id] = target_time
@@ -340,7 +356,7 @@ class IslandProduction(IslandRecipe, IslandDock):
             self.ensure_island_production_page()
             return False
 
-    def dispatch_place(self, place_id):
+    def dispatch_place(self, place_id, slots_to_check=None):
         if place_id not in self.slot_grids:
             place = (
                 production_place_name_with_id(place_id)
@@ -349,22 +365,40 @@ class IslandProduction(IslandRecipe, IslandDock):
             logger.error(f'{place} not found in current production page')
             return False
         place = production_place_name_with_id(place_id)
+        if slots_to_check is not None and not slots_to_check.intersection(
+                DIC_ISLAND_PRODUCTION_PLACE[place_id]['slot']):
+            logger.info(f'Skip {place}: no new ingredients from completed production')
+            return
         logger.info(f'Dispatch production place: {place}')
         slot_grid = self.slot_grids[place_id]
         is_first = True
         for slot_id, slot_button in zip(DIC_ISLAND_PRODUCTION_PLACE[place_id]['slot'], slot_grid.buttons):
-            if not is_first and has_cached_property(super(), 'recipe_id_sequence') and not self.recipe_id_sequence:
+            if slots_to_check is not None and slot_id not in slots_to_check:
+                continue
+            # Ranch slots each have a different recipe.
+            if (not is_first and place_id != 102
+                    and has_cached_property(super(), 'recipe_id_sequence') and not self.recipe_id_sequence):
                 logger.info(f'No more recipe for {place}, skip remaining slots')
                 break
             if self.is_slot_empty(slot_button):
-                self.dispatch_slot(slot_id=slot_id, slot_button=slot_button, worker='manjuu')
+                self.dispatch_slot(slot_id=slot_id, slot_button=slot_button)
             if is_first:
                 is_first = False
         del_cached_property(super(), 'recipe_id_sequence')
         del_cached_property(super(), 'all_recipe_stocks')
 
-    def dispatch_all(self):
+    def dispatch_all(self, check_all_empty_slots=False):
         logger.hr("Dispatch Production", level=2)
+        self.human_workers_available = True
+        slots_to_check = None
+        if not check_all_empty_slots:
+            slots_to_check = self.claimed_slots | {
+                slot_id for slot_id, slot in DIC_ISLAND_SLOT.items()
+                if self.claimed_slots.intersection(slot['ingredient_source_slots'])
+            }
+            if not slots_to_check:
+                logger.info('No completed production or external rewards to retry empty slots')
+                return
         self.ensure_top_page()
         self.failed_buy_items = set()
         dispatched_places = set()
@@ -372,7 +406,7 @@ class IslandProduction(IslandRecipe, IslandDock):
             try:
                 for place_id in self.slot_grids.keys():
                     if place_id not in dispatched_places:
-                        self.dispatch_place(place_id)
+                        self.dispatch_place(place_id, slots_to_check=slots_to_check)
                         dispatched_places.add(place_id)
                 if not self.next_page():
                     break
@@ -459,6 +493,16 @@ class IslandProduction(IslandRecipe, IslandDock):
         # Committed stock is rebuilt from the persisted per-slot plan below.
         self._pending_output = {}
         self.slot_plan = {}
+        check_all_empty_slots = self.config.cross_get(
+            "IslandProduction.Storage.Storage.CheckAllEmptySlots", default=False)
+        # Keep a full check pending until this run's claims and dispatch finish.
+        if not check_all_empty_slots:
+            self.config.cross_set("IslandProduction.Storage.Storage.CheckAllEmptySlots", True)
+        check_all_empty_slots = check_all_empty_slots or IslandProduction._first_run
+        # The bedtime arrangement has to fill every slot. Checking only the
+        # slots that finished production would leave the rest idle overnight.
+        if self.bedtime_hours:
+            check_all_empty_slots = True
         self.claim_all_rewards()
         yaml_text = self.config.cross_get("IslandProduction.IslandProduction.DailyBufferItems", "")
         if not yaml_text or yaml_text == "{}":
@@ -467,7 +511,7 @@ class IslandProduction(IslandRecipe, IslandDock):
         if self.claimed_slots.intersection(DIC_ISLAND_PRODUCTION_PLACE[201]['slot']):
             self.exchange_surplus_fish()
         self.restore_slot_plan()
-        self.dispatch_all()
+        self.dispatch_all(check_all_empty_slots=check_all_empty_slots)
         next_run_time = list(self.slot_finish_time.values())
         with self.config.multi_set():
             sorted_items = sorted(self.slot_finish_time.items(), key=lambda kv: (kv[1], kv[0]))
@@ -477,7 +521,9 @@ class IslandProduction(IslandRecipe, IslandDock):
                 str(slot_id): {str(item_id): amount for item_id, amount in plan.items()}
                 for slot_id, plan in sorted(self.slot_plan.items())
             })
+            self.config.cross_set("IslandProduction.Storage.Storage.CheckAllEmptySlots", False)
             if next_run_time:
                 self.config.task_delay(target=next_run_time)
             else:
                 self.config.task_delay(minute=30)
+        IslandProduction._first_run = False

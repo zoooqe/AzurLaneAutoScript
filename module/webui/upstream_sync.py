@@ -90,9 +90,9 @@ OBSOLETE_FILES = {
 # i18n keys this branch owns. A merge that loses one of them is a bug in the
 # conflict policy, not an upstream change, so the merge is rolled back.
 KEEP_I18N_KEYS = (
-    "IslandRestaurant.StrictWaitress",
-    "IslandRestaurant.WaitressLock",
-    "IslandRestaurant.WaitForFullMenu",
+    "IslandProduction.BedtimeEnable",
+    "IslandProduction.BedtimeTime",
+    "IslandProduction.BedtimeHours",
     "Gui.Text.IslandItemsPick",
     "Gui.Text.IslandItemsAmount",
     "Gui.Text.IslandItemsInvalidItem",
@@ -212,22 +212,40 @@ def _resolve_theirs(repo, path):
 
 
 def _resolve_i18n(repo, path):
-    """Take the upstream side of every conflict block, keep everything else."""
+    """Keep the members of both sides of every conflict block.
+
+    Upstream appends its new options at the same place in the file where this
+    branch appends its own, so taking either side silently drops the other.
+    Both blocks end on the last value of a member and share the closing brace,
+    so the local block only needs its own member closed before the upstream one
+    follows.
+    """
     full = os.path.join(ROOT, path.replace("/", os.sep))
     with open(full, "r", encoding="utf-8") as f:
         text = f.read()
     if "<<<<<<<" not in text:
         repo.run("add", "--", path)
         return True, "no conflict marker"
-    text = CONFLICT_RE.sub(lambda m: m.group(2), text)
+
+    def both_sides(match):
+        ours, theirs = match.group(1), match.group(2)
+        if not theirs.strip():
+            return ours
+        if not ours.strip():
+            return theirs
+        indent = re.match(r"([ \t]*)\S", ours)
+        indent = indent.group(1) if indent else ""
+        return ours.rstrip() + "\n" + indent + "},\n" + theirs
+
+    text = CONFLICT_RE.sub(both_sides, text)
     if "<<<<<<<" in text or ">>>>>>>" in text:
         return False, "conflict markers left after resolution"
-    with open(full, "w", encoding="utf-8", newline="\n") as f:
-        f.write(text)
     try:
         json.loads(text)
     except Exception as e:
         return False, "invalid json: %s" % e
+    with open(full, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
     repo.run("add", "--", path)
     return True, ""
 

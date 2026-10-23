@@ -793,14 +793,12 @@ IslandProduction:
   BedtimeHours:
     value: 8
     validate: '^(?:[1-9]|1[0-9]|2[0-4])(?:\.[0-9]+)?$'
+  UseWorkerjuuByDefault: true
 IslandOrder:
   StuckSeasonOrderId: 0
 IslandFreebie:
   Share: true
 IslandRestaurant:
-  WaitressLock: true
-  StrictWaitress: false
-  WaitForFullMenu: true
   KoiGrade:
     value: bronze
     option: [ bronze, silver, gold, diamond ]
