@@ -17,6 +17,13 @@ def func(ev: threading.Event):
 
     State.restart_event = ev
 
+    # Follow upstream before the webui imports its modules: uvicorn loads
+    # `module.webui.app` by name further down, so a merge applied here is the
+    # code this very start runs. The sync never blocks startup, it only logs.
+    from module.webui.upstream_sync import startup_sync
+
+    startup_sync()
+
     parser = argparse.ArgumentParser(description="Alas web service")
     parser.add_argument(
         "--host",
