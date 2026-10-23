@@ -7,7 +7,7 @@ from module.base.utils import random_rectangle_vector_opted
 from module.exception import RequestHumanTakeover
 from module.island.assets import *
 from module.island.data import DIC_ISLAND_PRODUCTION_PLACE, DIC_ISLAND_RECIPE, DIC_ISLAND_SLOT
-from module.island.utils import item_name_with_id, production_place_name_with_id
+from module.island.utils import get_bedtime_window, item_name_with_id, production_place_name_with_id
 from module.island_handler.dock import IslandDock
 from module.island_handler.dock_scanner import CharacterScanner
 from module.island_handler.exchange import FISH_MEAT_SOURCES
@@ -422,8 +422,37 @@ class IslandProduction(IslandRecipe, IslandDock):
         self.ui_back(check_button=page_island.check_button)
         self.ensure_island_production_page()
 
+    def get_bedtime_hours(self):
+        """Hours to fill when the task runs inside the bedtime window, else 0.
+
+        The window length and the production time to fill are the same number:
+        "fill 8 hours from midnight" both decides when the arrangement applies
+        and how long every slot should stay busy.
+        """
+        if not self.config.cross_get(
+                "IslandProduction.IslandProduction.BedtimeEnable", default=False):
+            return 0
+        raw_time = self.config.cross_get(
+            "IslandProduction.IslandProduction.BedtimeTime", default="00:00")
+        raw_hours = self.config.cross_get(
+            "IslandProduction.IslandProduction.BedtimeHours", default=8)
+        try:
+            hours = float(raw_hours)
+        except (TypeError, ValueError):
+            logger.warning(f'Invalid bedtime hours {raw_hours!r}, falling back to 8')
+            hours = 8
+        window = get_bedtime_window(datetime.now(), raw_time, hours)
+        if window is None:
+            return 0
+        logger.info(
+            f'Bedtime arrangement is on: fill production for {hours:g}h, '
+            f'window {window[0]:%H:%M}-{window[1]:%H:%M}'
+        )
+        return hours
+
     def run(self):
         self.ensure_island_production_page()
+        self.bedtime_hours = self.get_bedtime_hours()
         slot_finish_time = self.config.cross_get("IslandProduction.Storage.Storage.SlotFinishTime", default={})
         self.slot_finish_time = {int(k): datetime.fromisoformat(v) for k, v in slot_finish_time.items()}
         self.fish_meat_stock = {}

@@ -783,6 +783,11 @@ IslandProduction:
     value: |-
       {}
   SkipBufferSurplus: true
+  BedtimeEnable: false
+  BedtimeTime:
+    value: '00:00'
+    valuetype: str
+  BedtimeHours: 8
 IslandOrder:
   StuckSeasonOrderId: 0
 IslandFreebie:

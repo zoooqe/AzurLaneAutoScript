@@ -9622,6 +9622,19 @@
       "SkipBufferSurplus": {
         "type": "checkbox",
         "value": true
+      },
+      "BedtimeEnable": {
+        "type": "checkbox",
+        "value": false
+      },
+      "BedtimeTime": {
+        "type": "input",
+        "value": "00:00",
+        "valuetype": "str"
+      },
+      "BedtimeHours": {
+        "type": "input",
+        "value": 8
       }
     },
     "Storage": {

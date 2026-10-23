@@ -17,6 +17,7 @@ from module.island.data import DIC_ISLAND_ITEM, DIC_ISLAND_RECIPE, DIC_ISLAND_SH
 from module.island.utils import (
     ceil_div_or_ceil,
     ceil_with_epsilon,
+    get_bedtime_batch_count,
     get_idle_accumulating_batch_count,
     get_task_target_items,
     get_target_stock_load_rate,
@@ -191,6 +192,9 @@ def get_idle_accumulating_weight(stock, target_stock, demand, idle_accumulating)
 
 RECIPE_MODE_BUFFER_SURPLUS = 'buffer_surplus'
 RECIPE_MODE_IDLE_ACCUMULATING = 'idle_accumulating'
+# Filler for the bedtime arrangement: a recipe this place can run long enough to
+# cover the whole window, even though normal demand does not ask for it.
+RECIPE_MODE_BEDTIME = 'bedtime'
 
 
 def get_recipe_entry_weight(recipe_id, info):
@@ -569,6 +573,8 @@ class IslandRecipe(IslandExchange, IslandShop):
         normal_entries.sort(key=lambda entry: get_recipe_entry_weight(entry[0], entry[1]), reverse=True)
         optional_entries.sort(key=get_optional_recipe_entry_weight)
         sequence = normal_entries + optional_entries
+        bedtime_entries = self.get_bedtime_filler_entries(sequence)
+        sequence = sequence + bedtime_entries
         sequence_text = [
             f'{format_recipe_with_product(recipe_id)} [{mode or "normal"}]'
             for recipe_id, _info, mode in sequence
@@ -577,7 +583,53 @@ class IslandRecipe(IslandExchange, IslandShop):
             'Calculated recipe sequence to run: '
             f'{sequence_text}'
         )
+        if bedtime_entries:
+            logger.info(f'Bedtime filler for {self.bedtime_hours:g}h:')
+            for recipe_id, _info, _mode in bedtime_entries:
+                longest = self.get_bedtime_filler_hours(recipe_id)
+                if longest >= self.bedtime_hours:
+                    note = 'covers the window'
+                else:
+                    note = 'cannot reach the window, batches go to the limit'
+                logger.info(
+                    f'  {format_recipe_with_product(recipe_id)}: up to '
+                    f'{DIC_ISLAND_RECIPE[recipe_id]["production_limit"]} batches, '
+                    f'{longest:.1f}h, {note}'
+                )
         return sequence
+
+    def get_bedtime_filler_entries(self, sequence):
+        """Recipes that can fill the bedtime window but are not otherwise planned.
+
+        Only recipes of the place being dispatched are considered. Recipes whose
+        batch limit still covers the whole window are preferred, but ones that
+        cannot reach it are kept as well: filling the batch limit is enough, and
+        a slot with the longest possible run still beats an idle slot.
+        """
+        hours = getattr(self, 'bedtime_hours', 0)
+        place_id = getattr(self, 'bedtime_place_id', None)
+        if not hours or place_id is None:
+            return []
+        planned = {entry[0] for entry in sequence}
+        full = []
+        partial = []
+        for recipe_id, info in self.recipe_info_by_id.items():
+            if recipe_id in planned or recipe_id // 1000 != place_id:
+                continue
+            data = DIC_ISLAND_RECIPE[recipe_id]
+            entry = (recipe_id, info, RECIPE_MODE_BEDTIME)
+            if data['production_limit'] * data['workload'] >= hours * 36000:
+                full.append(entry)
+            else:
+                partial.append(entry)
+        full.sort(key=lambda entry: get_recipe_entry_weight(entry[0], entry[1]), reverse=True)
+        partial.sort(key=lambda entry: get_recipe_entry_weight(entry[0], entry[1]), reverse=True)
+        return full + partial
+
+    def get_bedtime_filler_hours(self, recipe_id):
+        """Longest run one slot can get from `recipe_id`, in hours."""
+        data = DIC_ISLAND_RECIPE[recipe_id]
+        return data['production_limit'] * data['workload'] / 36000
 
     @staticmethod
     def calculate_recipe_run_count(info):
@@ -984,26 +1036,44 @@ class IslandRecipe(IslandExchange, IslandShop):
         """
         self.working_slot_id = slot_id
         self.last_started_recipe = None
+        # Bedtime filler entries are chosen per production place, and the slot
+        # is what says which place it belongs to.
+        slot = DIC_ISLAND_SLOT.get(slot_id) if slot_id is not None else None
+        self.bedtime_place_id = slot['place'] if slot else None
         del_cached_property(self, 'recipe_grid')
         del_cached_property(self, 'recipe_ids')
         while self.recipe_id_sequence:
             recipe_id, info, mode = self.recipe_id_sequence[0]
             production_limit = DIC_ISLAND_RECIPE[recipe_id]['production_limit']
+            workload = DIC_ISLAND_RECIPE[recipe_id]['workload']
             if mode == RECIPE_MODE_BUFFER_SURPLUS:
                 batch_count = self.calculate_buffer_surplus_run_count(info)
+            elif mode == RECIPE_MODE_BEDTIME:
+                batch_count = get_bedtime_batch_count(workload, self.bedtime_hours)
             elif mode:
                 batch_count = get_idle_accumulating_batch_count(
-                    DIC_ISLAND_RECIPE[recipe_id]['workload'],
+                    workload,
                     self.config.ISLAND_IDLE_ACCUMULATING_DISPATCH_HOURS,
                 )
             else:
                 batch_count = self.calculate_recipe_run_count(info)
+            # The bedtime arrangement overrides the daily-demand batch count: the
+            # slot has to stay busy for the whole window, not only until today's
+            # replenishment target is reached.
+            bedtime_hours = getattr(self, 'bedtime_hours', 0)
+            if bedtime_hours:
+                batch_count = max(batch_count, get_bedtime_batch_count(workload, bedtime_hours))
             strategy = mode or 'normal'
             logger.info(
                 f'Plan to run {batch_count} batch(es) of recipe '
                 f'{format_recipe_with_product(recipe_id)} in {strategy} mode, '
                 f'limitation: {production_limit} batches'
             )
+            if bedtime_hours:
+                logger.info(
+                    f'Bedtime arrangement: fill {bedtime_hours:g}h, asking for '
+                    f'{batch_count} batch(es) of {format_recipe_with_product(recipe_id)}'
+                )
             if batch_count > production_limit:
                 logger.info(f"Will try to run {production_limit} batches")
                 batch_count = production_limit

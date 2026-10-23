@@ -1950,7 +1950,10 @@
       "DailyBufferItems": "{}",
       "ManualBufferItems": "{}",
       "IdleAccumulatingItems": "{}",
-      "SkipBufferSurplus": true
+      "SkipBufferSurplus": true,
+      "BedtimeEnable": false,
+      "BedtimeTime": "00:00",
+      "BedtimeHours": 8
     },
     "Storage": {
       "Storage": {}

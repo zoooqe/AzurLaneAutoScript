@@ -2677,6 +2677,18 @@
     "SkipBufferSurplus": {
       "name": "Skip Buffer-Surplus Production",
       "help": "Skip buffer-surplus eligibility checks and proceed directly to idle-accumulating production. When disabled, buffer-surplus is tried first; idle accumulation is still used if that attempt fails."
+    },
+    "BedtimeEnable": {
+      "name": "Bedtime arrangement",
+      "help": "When enabled, running Island Production inside the configured window fills\nevery production slot with the configured hours of work, so no slot goes\nidle overnight. Slots are filled as far as ingredients allow."
+    },
+    "BedtimeTime": {
+      "name": "Bedtime start",
+      "help": "Start of the bedtime arrangement, in HH:MM.\nThe window begins here and lasts as long as the fill hours.\nDefault 00:00 counts from midnight."
+    },
+    "BedtimeHours": {
+      "name": "Bedtime fill hours",
+      "help": "Hours of production to queue in every slot, and also the length of the\nbedtime window. Default 8."
     }
   },
   "IslandOrder": {

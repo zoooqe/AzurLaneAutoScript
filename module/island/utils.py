@@ -1,6 +1,6 @@
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict
 
 import numpy as np
@@ -525,6 +525,62 @@ def get_idle_accumulating_batch_count(workload, quantum_hours):
     if workload <= 0:
         return 1
     return max(int(quantum_hours * 36000 // workload), 1)
+
+
+def parse_bedtime_time(text, default=(0, 0)):
+    """Parse a "HH:MM" bedtime start into (hour, minute).
+
+    Tolerates full-width colons, dots and a bare hour. A typo falls back to
+    `default` instead of raising: a wrong bedtime should start the window at
+    midnight, not break the production task.
+    """
+    if isinstance(text, (int, float)) and not isinstance(text, bool):
+        return int(text) % 24, 0
+    raw = str(text or '').strip()
+    match = re.search(r'(\d{1,2})\s*[:：.．]\s*(\d{1,2})', raw)
+    if match:
+        hour, minute = int(match.group(1)), int(match.group(2))
+    else:
+        match = re.fullmatch(r'(\d{1,2})', raw)
+        if not match:
+            return default
+        hour, minute = int(match.group(1)), 0
+    if 0 <= hour < 24 and 0 <= minute < 60:
+        return hour, minute
+    return default
+
+
+def get_bedtime_window(now, time_text, hours):
+    """The bedtime window containing `now`, as (start, end), or None.
+
+    `hours` is both the window length and the production time to fill, so a
+    window of 00:00 + 8h ends at 08:00, while 23:00 + 8h wraps into the next
+    day and is still recognised after midnight.
+    """
+    if hours <= 0:
+        return None
+    hour, minute = parse_bedtime_time(time_text)
+    start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    for days in (0, -1):
+        candidate = start + timedelta(days=days)
+        end = candidate + timedelta(hours=hours)
+        if candidate <= now < end:
+            return candidate, end
+    return None
+
+
+def get_bedtime_batch_count(workload, hours):
+    """Batches needed to keep one slot busy for `hours`.
+
+    Workload is in game units, 36000 per hour. Rounds up: finishing slightly
+    after the window closes is harmless, finishing before it leaves the slot
+    idle while the user is asleep.
+    """
+    if hours <= 0:
+        return 0
+    if workload <= 0:
+        return 1
+    return max(-(-int(round(hours * 36000)) // int(workload)), 1)
 
 
 def get_order_effective_stock(stock, hard_floor, reserve=0, priority=False):

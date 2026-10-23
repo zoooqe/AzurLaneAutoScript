@@ -452,6 +452,9 @@ class GeneratedConfig:
     IslandProduction_ManualBufferItems = '{}'
     IslandProduction_IdleAccumulatingItems = '{}'
     IslandProduction_SkipBufferSurplus = True
+    IslandProduction_BedtimeEnable = False
+    IslandProduction_BedtimeTime = '00:00'
+    IslandProduction_BedtimeHours = 8
 
     # Group `IslandOrder`
     IslandOrder_StuckSeasonOrderId = 0
