@@ -387,6 +387,54 @@ def put_arg_select(kwargs: T_Output_Kwargs) -> Output:
     )
 
 
+TIME_STEP_MINUTES = 30
+
+
+def time_options(step: int = TIME_STEP_MINUTES) -> List[str]:
+    """Every "HH:MM" of a day, one per `step` minutes."""
+    if not isinstance(step, int) or isinstance(step, bool) or step <= 0 or 60 % step:
+        step = TIME_STEP_MINUTES
+    return [
+        f'{minute // 60:02d}:{minute % 60:02d}'
+        for minute in range(0, 24 * 60, step)
+    ]
+
+
+def put_arg_time(kwargs: T_Output_Kwargs) -> Output:
+    """An "HH:MM" argument picked from a dropdown instead of typed.
+
+    The value crosses into the config as a plain string, so the task code and
+    hand-edited configs keep working. `step` comes from argument.yaml and is the
+    minute interval between two choices, 30 by default. A value that is off the
+    grid stays selectable as its own entry instead of being snapped.
+    """
+    name: str = kwargs["name"]
+    value = kwargs.get("value")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        value = f'{int(value) % 24:02d}:00'
+    step: int = kwargs.pop("step", TIME_STEP_MINUTES)
+    kwargs.pop("options", None)
+    kwargs.pop("options_label", None)
+    kwargs.pop("invalid_feedback", None)
+
+    options = time_options(step)
+    if value not in options:
+        options = [value] + options
+    kwargs["value"] = value
+    kwargs["options"] = [
+        {"label": option, "value": option, "select": option == value}
+        for option in options
+    ]
+
+    return put_scope(
+        f"arg_container-time-{name}",
+        [
+            get_title_help(kwargs),
+            put_select(**kwargs).style("--input--"),
+        ],
+    )
+
+
 def put_arg_state(kwargs: T_Output_Kwargs) -> Output:
     name: str = kwargs["name"]
     value: str = kwargs["value"]
@@ -666,6 +714,7 @@ _widget_type_to_func: Dict[str, Callable] = {
     "lock": put_arg_state,
     "datetime": put_arg_input,  # TODO
     "select": put_arg_select,
+    "time": put_arg_time,
     "textarea": put_arg_textarea,
     "checkbox": put_arg_checkbox,
     "storage": put_arg_storage,

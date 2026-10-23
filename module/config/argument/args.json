@@ -9628,13 +9628,16 @@
         "value": false
       },
       "BedtimeTime": {
-        "type": "input",
+        "type": "time",
         "value": "00:00",
-        "valuetype": "str"
+        "valuetype": "str",
+        "step": 30,
+        "validate": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
       },
       "BedtimeHours": {
         "type": "input",
-        "value": 8
+        "value": 8,
+        "validate": "^(?:[1-9]|1[0-9]|2[0-4])(?:\\.[0-9]+)?$"
       }
     },
     "Storage": {

@@ -2684,7 +2684,7 @@
     },
     "BedtimeTime": {
       "name": "Bedtime start",
-      "help": "Start of the bedtime arrangement, in HH:MM.\nThe window begins here and lasts as long as the fill hours.\nDefault 00:00 counts from midnight."
+      "help": "Start of the bedtime arrangement, picked from a list in half-hour steps.\nThe window begins here and lasts as long as the fill hours.\nDefault 00:00 counts from midnight."
     },
     "BedtimeHours": {
       "name": "Bedtime fill hours",
