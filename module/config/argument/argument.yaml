@@ -789,6 +789,7 @@ IslandFreebie:
   Share: true
 IslandRestaurant:
   WaitressLock: true
+  StrictWaitress: false
   WaitForFullMenu: true
   KoiGrade:
     value: bronze

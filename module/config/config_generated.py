@@ -461,6 +461,7 @@ class GeneratedConfig:
 
     # Group `IslandRestaurant`
     IslandRestaurant_WaitressLock = True
+    IslandRestaurant_StrictWaitress = False
     IslandRestaurant_WaitForFullMenu = True
     IslandRestaurant_KoiGrade = 'bronze'  # bronze, silver, gold, diamond
     IslandRestaurant_KoiWaitress1 = 'any'  # none, any, Chao_Ho, Chang_Feng

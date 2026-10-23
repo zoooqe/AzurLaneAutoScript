@@ -9917,6 +9917,10 @@
         "type": "checkbox",
         "value": true
       },
+      "StrictWaitress": {
+        "type": "checkbox",
+        "value": false
+      },
       "WaitForFullMenu": {
         "type": "checkbox",
         "value": true

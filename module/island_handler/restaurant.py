@@ -65,6 +65,18 @@ class WaitressOccupied(Exception):
     pass
 
 
+class WaitressUnavailable(Exception):
+    """Strict mode: a configured waitress is not on duty, so do not open.
+
+    Raised instead of falling back to a free character, so the restaurant is
+    skipped for this round rather than run by someone the user did not pick.
+    """
+
+    def __init__(self, message, waitress=None):
+        super().__init__(message)
+        self.waitress = waitress
+
+
 class WaitressLocked(Exception):
     """A named waitress is still employed by another restaurant until `finish_time`.
 
@@ -431,6 +443,18 @@ class IslandRestaurant(IslandDock):
             "IslandBusiness.IslandRestaurant.WaitressLock", True
         ))
 
+    @property
+    def strict_waitress(self):
+        """Open only when every configured waitress is actually on duty.
+
+        Off by default: an unavailable waitress is quietly replaced by a free
+        character so the round still runs. Turning this on skips the round
+        instead, which never puts someone the user did not pick on a slot.
+        """
+        return bool(self.config.cross_get(
+            "IslandBusiness.IslandRestaurant.StrictWaitress", False
+        ))
+
     def locked_waitress_status(self, waitress):
         """Where ``waitress`` is currently working, and whether she is idle.
 
@@ -560,6 +584,19 @@ class IslandRestaurant(IslandDock):
                 self.island_dock_select_one(candidate.button)
                 selected_waitresses.add(candidate.identity)
                 continue
+
+            if self.strict_waitress:
+                state = candidate.status if candidate is not None else 'not found in the dock'
+                logger.warning(
+                    f"Waitress {waitress} is {state}, strict waitress is on: "
+                    f"skip restaurant {restaurant} this round instead of "
+                    f"picking a substitute"
+                )
+                self.ui_back(check_button=self.is_in_island_restaurant)
+                raise WaitressUnavailable(
+                    f"Restaurant {restaurant} skipped, waitress {waitress} is {state}",
+                    waitress=waitress,
+                )
 
             if candidate is not None:
                 time_until_update = get_server_next_update("00:00") - datetime.now()

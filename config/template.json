@@ -2041,6 +2041,7 @@
     },
     "IslandRestaurant": {
       "WaitressLock": true,
+      "StrictWaitress": false,
       "WaitForFullMenu": true,
       "KoiGrade": "bronze",
       "KoiWaitress1": "any",

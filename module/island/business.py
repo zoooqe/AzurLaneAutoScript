@@ -11,6 +11,7 @@ from module.island_handler.restaurant import (
     MenuIncomplete,
     WaitressLocked,
     WaitressOccupied,
+    WaitressUnavailable,
 )
 from module.island_handler.restaurant_config import (
     RESTAURANT_IDS,
@@ -243,6 +244,13 @@ class IslandBusiness(IslandRestaurant):
             except WaitressOccupied as e:
                 logger.warning(e)
                 next_run_time[restaurant_id] = datetime.now() + timedelta(hours=8)
+                unchecked_restaurants.remove(restaurant_id)
+                success = False
+            except WaitressUnavailable as e:
+                # Strict waitress mode: running with a substitute would put
+                # someone the user did not pick on a slot, so skip this round.
+                logger.warning(f"{e}, retry this restaurant in 1 hour")
+                next_run_time[restaurant_id] = datetime.now() + timedelta(hours=1)
                 unchecked_restaurants.remove(restaurant_id)
                 success = False
             except WaitressLocked as e:
