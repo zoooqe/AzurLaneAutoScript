@@ -587,6 +587,24 @@ class IslandRestaurant(IslandDock):
 
             if self.strict_waitress:
                 state = candidate.status if candidate is not None else 'not found in the dock'
+                # She may simply be on shift at another configured restaurant.
+                # Her end time is known there, so queue this restaurant right
+                # after she finishes instead of polling every hour.
+                status, employer_id, locked_until = self.locked_waitress_status(waitress)
+                if status == 'running' and locked_until and locked_until > datetime.now():
+                    employer = production_place_name_with_id(employer_id)
+                    logger.info(
+                        f"Waitress {waitress} is employed by {employer} until "
+                        f"{locked_until}, strict waitress is on: start restaurant "
+                        f"{restaurant} right after she is free"
+                    )
+                    self.ui_back(check_button=self.is_in_island_restaurant)
+                    raise WaitressLocked(
+                        f"Restaurant {restaurant} waits for waitress {waitress} "
+                        f"until {locked_until}",
+                        waitress=waitress,
+                        finish_time=locked_until,
+                    )
                 logger.warning(
                     f"Waitress {waitress} is {state}, strict waitress is on: "
                     f"skip restaurant {restaurant} this round instead of "

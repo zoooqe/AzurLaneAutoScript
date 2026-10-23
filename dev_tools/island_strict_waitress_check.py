@@ -7,12 +7,29 @@ with small stubs so choose_waitress can run without a device.
 Run with: toolkit/python.exe dev_tools/island_strict_waitress_check.py
 """
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from module.island_handler import restaurant as restaurant_module
-from module.island_handler.restaurant import IslandRestaurant, WaitressUnavailable
+from module.island_handler.restaurant import (
+    IslandRestaurant,
+    WaitressLocked,
+    WaitressUnavailable,
+)
+
+NOW = datetime(2026, 10, 23, 19, 57)
+NEXT_UPDATE = datetime(2026, 10, 24, 0, 0)
+
+# Cheshire is shared by 602 (Bear) and 901 (Cafe), which is the real setup.
+SLOTS = {
+    601: ('none', 'none'),
+    602: ('Cheshire', 'none'),
+    603: ('none', 'none'),
+    604: ('none', 'none'),
+    901: ('Cheshire', 'Belfast'),
+}
 
 
 class Candidate:
@@ -32,11 +49,13 @@ class Config:
         return default
 
 
-def make(strict, dock):
+def make(strict, dock, states=None, finishes=None):
     """dock: identity -> status, or None when the character is missing."""
     obj = object.__new__(IslandRestaurant)
     obj.working_restaurant_id = 901
     obj.config = Config(strict)
+    obj.restaurant_states = states or {}
+    obj.restaurant_finish_times = finishes or {}
     # cached_property reads __dict__ first; without it the offset chain would
     # reach self.device, which does not exist on a stub.
     obj.__dict__['_restaurant_offset'] = (0, 0, 0, 0)
@@ -62,10 +81,9 @@ def make(strict, dock):
     return obj
 
 
-restaurant_module.get_waitress_slots = (
-    lambda config, restaurant_id: ('Cheshire', 'Belfast')
-)
-restaurant_module.production_place_name_with_id = lambda rid: 'Cafe'
+restaurant_module.get_waitress_slots = lambda config, restaurant_id: SLOTS[restaurant_id]
+restaurant_module.get_server_next_update = lambda target: NEXT_UPDATE
+restaurant_module.production_place_name_with_id = lambda rid: {602: 'Bear', 901: 'Cafe'}.get(rid, 'Other')
 
 results = []
 
@@ -117,6 +135,30 @@ except WaitressUnavailable as e:
     raised = str(e)
 check('strict on, second busy -> WaitressUnavailable', bool(raised), True)
 check('strict on, second busy -> no fallback', obj.fallback_calls, [])
+
+# 6. Strict on, she is on shift at 602 and the end is known -> queue this
+#    restaurant for the moment she finishes, no hourly polling.
+finish = datetime.now() + timedelta(hours=1)
+obj = make(True, {'Cheshire': 'occupied', 'Belfast': 'free'},
+           states={602: 'running'}, finishes={602: finish})
+raised = None
+try:
+    obj.choose_waitress()
+except WaitressLocked as e:
+    raised = (e.waitress, e.finish_time)
+check('strict on, on shift elsewhere -> WaitressLocked', raised, ('Cheshire', finish))
+check('strict on, on shift elsewhere -> no fallback', obj.fallback_calls, [])
+
+# 7. Strict on, the recorded end already passed -> retry, do not queue backwards.
+stale = datetime.now() - timedelta(minutes=5)
+obj = make(True, {'Cheshire': 'occupied', 'Belfast': 'free'},
+           states={602: 'running'}, finishes={602: stale})
+raised = None
+try:
+    obj.choose_waitress()
+except WaitressUnavailable as e:
+    raised = True
+check('strict on, stale end time -> WaitressUnavailable', raised, True)
 
 print()
 print(f'{sum(results)}/{len(results)} checks passed')
