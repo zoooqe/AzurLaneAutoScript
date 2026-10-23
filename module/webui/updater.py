@@ -11,6 +11,7 @@ from deploy.pip import PipManager
 from deploy.utils import DEPLOY_CONFIG
 from module.base.retry import retry
 from module.logger import logger
+from module.webui import upstream_sync
 from module.webui.config import DeployConfig
 from module.webui.process_manager import ProcessManager
 from module.webui.setting import State
@@ -66,49 +67,56 @@ class Updater(DeployConfig, GitManager, PipManager):
         else:
             return logs
 
+    def _behind_upstream(self):
+        """Commits upstream has and this branch does not, or (None, error).
+
+        The bundled check runs `git log --not --remotes=origin/*`, which lists
+        every commit this branch added on top of upstream, so a checkout with
+        local work always ends up at "Cannot find local commit in upstream, skip
+        update" and the button never appears. Counting `HEAD..origin/master`
+        answers the question the button actually asks.
+
+        GitOverCdn is skipped on purpose: it downloads a tarball and resets to
+        it, which would throw the local island work away.
+        """
+        config = upstream_sync.read_deploy_config()
+        repo = upstream_sync.Repo(config["git"], config["timeout"])
+        target = "%s/%s" % (upstream_sync.UPSTREAM, self.Branch)
+
+        error = "git fetch failed"
+        for _ in range(3):
+            try:
+                code, _, err = repo.run("fetch", upstream_sync.UPSTREAM, self.Branch)
+            except Exception as e:
+                code, err = 1, str(e)
+            if code == 0:
+                break
+            error = err or error
+        else:
+            return None, error
+
+        behind = repo.out("rev-list", "--count", "HEAD..%s" % target)
+        if not behind.isdigit():
+            return None, "git rev-list HEAD..%s failed" % target
+        return int(behind), target
+
     def _check_update(self) -> bool:
         self.state = "checking"
 
-        if State.deploy_config.GitOverCdn:
-            status = self.goc_client.get_status()
-            if status == "uptodate":
-                logger.info(f"No update")
-                return False
-            elif status == "behind":
-                logger.info(f"New update available")
-                return True
-            else:
-                # failed, should fallback to `git pull`
-                pass
-
-        source = "origin"
-        for _ in range(3):
-            if self.execute(
-                f'"{self.git}" fetch {source} {self.Branch}', allow_failure=True
-            ):
-                break
-        else:
-            logger.warning("Git fetch failed")
+        behind, detail = self._behind_upstream()
+        if behind is None:
+            logger.warning(f"Check update failed: {detail}")
             return False
 
-        log = self.execute_output(
-            f'"{self.git}" log --not --remotes={source}/* -1 --oneline'
-        )
-        if log:
-            logger.info(
-                f"Cannot find local commit {log.split()[0]} in upstream, skip update"
-            )
-            return False
-
-        sha1, _, _, message = self.get_commit(f"..{source}/{self.Branch}")
-
-        if sha1:
-            logger.info(f"New update available")
-            logger.info(f"{sha1[:8]} - {message}")
-            return True
-        else:
+        if behind == 0:
             logger.info(f"No update")
             return False
+
+        sha1, _, _, message = self.get_commit(f"..{detail}")
+        logger.info(f"New update available")
+        logger.info(f"{(sha1 or '')[:8]} - {message}")
+        logger.info(f"{behind} commit(s) behind {detail}")
+        return True
 
     def _check_update_(self) -> bool:
         """
@@ -184,9 +192,34 @@ class Updater(DeployConfig, GitManager, PipManager):
         if self.state in (0, "failed", "finish"):
             self.state = self._check_update()
 
-    @retry(ExecutionError, tries=3, delay=5, logger=None)
     def git_install(self):
-        return super().git_install()
+        """Merge upstream instead of the bundled `git reset --hard`.
+
+        AutoUpdate stays false in deploy.yaml: what it gates is a reset, and a
+        reset discards every local change, while this checkout carries island
+        work upstream does not have. The update button still has to update
+        something, so it runs the same merge as the startup hook.
+
+        Conflicts it does not fully understand raise ExecutionError, which turns
+        the button into "update failed" and restarts the instances that were
+        stopped for the update. Deliberately not decorated with @retry: a
+        conflict needs a human, not three more attempts.
+        """
+        result = upstream_sync.sync()
+        if result.status == "merged":
+            logger.info(f"Upstream merged, {result.detail}")
+            return
+        if result.status == "up-to-date":
+            logger.info("Already up to date")
+            return
+        if result.status == "needs-manual":
+            for path in result.files:
+                logger.warning(f"  needs manual merge: {path}")
+            raise ExecutionError(
+                f"upstream has {result.detail}, but {len(result.files)} file(s) "
+                f"need a manual merge: {', '.join(result.files)}"
+            )
+        raise ExecutionError(f"upstream sync {result.status}: {result.detail}")
 
     @retry(ExecutionError, tries=3, delay=5, logger=None)
     def pip_install(self):

@@ -12,7 +12,9 @@ The merge is only allowed to resolve conflicts it fully understands:
 * island assets are merged name by name, so local templates survive while
   upstream definitions win;
 * i18n conflicts take the upstream wording, then the local keys that belong to
-  this branch are verified to still be there.
+  this branch are verified to still be there;
+* `gui.py` and `module/webui/updater.py` keep the local side of the conflicting
+  hunks, since they are this branch's own hook into the update flow.
 
 Anything else stops the merge, leaves the checkout untouched and reports the
 file list. Startup must never end up with a half-merged tree.
@@ -57,6 +59,16 @@ THEIRS_PREFIX = (
 
 # Merged definition by definition instead of whole file.
 ASSETS_FILE = "module/island/assets.py"
+
+# Conflict blocks keep the local side, the rest of the file follows upstream.
+# These are this branch's hooks into the update flow: `gui.py` starts the sync,
+# `updater.py` makes the update button merge instead of reset. Upstream touching
+# them as well must not stop the sync, or the "no manual work" promise breaks the
+# first time upstream cleans up its updater.
+OURS = {
+    "module/webui/updater.py",
+    "gui.py",
+}
 
 I18N_FILES = (
     "module/config/i18n/zh-CN.json",
@@ -230,6 +242,29 @@ def _asset_definitions(text):
     return found
 
 
+def _resolve_ours(repo, path):
+    """Keep the local side of every conflict block, follow upstream elsewhere."""
+    full = os.path.join(ROOT, path.replace("/", os.sep))
+    with open(full, "r", encoding="utf-8") as f:
+        text = f.read()
+    if "<<<<<<<" not in text:
+        repo.run("add", "--", path)
+        return True, "no conflict marker"
+
+    text = CONFLICT_RE.sub(lambda m: m.group(1), text)
+    if "<<<<<<<" in text or ">>>>>>>" in text:
+        return False, "conflict markers left after resolution"
+    if path.endswith(".py"):
+        try:
+            compile(text, path, "exec")
+        except SyntaxError as e:
+            return False, "syntax error after resolution: %s" % e
+    with open(full, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    repo.run("add", "--", path)
+    return True, "kept the local side of the conflict"
+
+
 def _resolve_assets(repo, path, upstream_ref):
     """Upstream file plus whatever local definitions upstream does not have."""
     ours_text = repo.run("show", "HEAD:" + path)[1]
@@ -363,7 +398,11 @@ def sync(dry_run=False, push=False):
         _, conflicted, _ = repo.run("diff", "--name-only", "--diff-filter=U")
         paths = [p for p in conflicted.splitlines() if p.strip()]
 
-        unknown = [p for p in paths if not (_is_theirs(p) or p in I18N_FILES or p == ASSETS_FILE)]
+        unknown = [
+            p
+            for p in paths
+            if not (_is_theirs(p) or p in I18N_FILES or p in OURS or p == ASSETS_FILE)
+        ]
         if unknown:
             repo.run("merge", "--abort")
             logger.warning(
@@ -388,6 +427,8 @@ def sync(dry_run=False, push=False):
                 ok, detail = _resolve_theirs(repo, path)
             elif path in I18N_FILES:
                 ok, detail = _resolve_i18n(repo, path)
+            elif path in OURS:
+                ok, detail = _resolve_ours(repo, path)
             elif path == ASSETS_FILE:
                 ok, detail = _resolve_assets(repo, path, branch)
             else:
