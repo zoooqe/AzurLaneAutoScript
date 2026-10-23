@@ -20,6 +20,11 @@ config/reloadalas
 test.py
 test/
 
+# Local tooling leftovers
+.sync_backup/
+.workbuddy/
+assets/island/transport/new_templates/
+
 # Created by .ignore support plugin (hsz.mobi)
 
 ### JetBrains template

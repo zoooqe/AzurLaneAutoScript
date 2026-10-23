@@ -1,0 +1,528 @@
+diff --git a/module/config/argument/args.json b/module/config/argument/args.json
+index 94120166..90d1fe0c 100644
+--- a/module/config/argument/args.json
++++ b/module/config/argument/args.json
+@@ -9604,19 +9604,19 @@
+     },
+     "IslandProduction": {
+       "HardFloorItems": {
+-        "type": "textarea",
++        "type": "island_items",
+         "value": "{}"
+       },
+       "DailyBufferItems": {
+-        "type": "textarea",
++        "type": "island_items",
+         "value": "{}"
+       },
+       "ManualBufferItems": {
+-        "type": "textarea",
++        "type": "island_items",
+         "value": "{}"
+       },
+       "IdleAccumulatingItems": {
+-        "type": "textarea",
++        "type": "island_items",
+         "value": "{}"
+       },
+       "SkipBufferSurplus": {
+diff --git a/module/config/argument/argument.yaml b/module/config/argument/argument.yaml
+index a93c7662..f2072eb6 100644
+--- a/module/config/argument/argument.yaml
++++ b/module/config/argument/argument.yaml
+@@ -767,19 +767,19 @@ OpsiHazard1Leveling:
+ 
+ IslandProduction:
+   HardFloorItems:
+-    type: textarea
++    type: island_items
+     value: |-
+       {}
+   DailyBufferItems:
+-    type: textarea
++    type: island_items
+     value: |-
+       {}
+   ManualBufferItems:
+-    type: textarea
++    type: island_items
+     value: |-
+       {}
+   IdleAccumulatingItems:
+-    type: textarea
++    type: island_items
+     value: |-
+       {}
+   SkipBufferSurplus: true
+diff --git a/module/config/argument/gui.yaml b/module/config/argument/gui.yaml
+index 82302d3e..96ae9ec1 100644
+--- a/module/config/argument/gui.yaml
++++ b/module/config/argument/gui.yaml
+@@ -113,4 +113,13 @@ Text:
+   InvalidFeedBack:
+   Clear:
+   EnterPassword:
+-  ChooseFile:
+\ No newline at end of file
++  ChooseFile:
++  IslandItemsPick:
++  IslandItemsAmount:
++  IslandItemsAdd:
++  IslandItemsClear:
++  IslandItemsEmpty:
++  IslandItemsDelete:
++  IslandItemsEdit:
++  IslandItemsInvalidItem:
++  IslandItemsInvalidAmount:
+\ No newline at end of file
+diff --git a/module/config/i18n/en-US.json b/module/config/i18n/en-US.json
+index 9422cf0c..12b767d8 100644
+--- a/module/config/i18n/en-US.json
++++ b/module/config/i18n/en-US.json
+@@ -3097,7 +3097,16 @@
+       "InvalidFeedBack": "Invalid format. Example: {0}",
+       "Clear": "Clear",
+       "EnterPassword": "Enter password",
+-      "ChooseFile": "Choose file"
++      "ChooseFile": "Choose file",
++      "IslandItemsPick": "Select item",
++      "IslandItemsAmount": "Amount, e.g. 300 or 12.5",
++      "IslandItemsAdd": "Add / Update",
++      "IslandItemsClear": "Clear all",
++      "IslandItemsEmpty": "No item configured",
++      "IslandItemsDelete": "Delete",
++      "IslandItemsEdit": "Edit",
++      "IslandItemsInvalidItem": "Select an item first",
++      "IslandItemsInvalidAmount": "Invalid amount, enter a number greater than 0"
+     }
+   }
+ }
+\ No newline at end of file
+diff --git a/module/config/i18n/ja-JP.json b/module/config/i18n/ja-JP.json
+index 73a0fd4b..3a8d4805 100644
+--- a/module/config/i18n/ja-JP.json
++++ b/module/config/i18n/ja-JP.json
+@@ -3097,7 +3097,16 @@
+       "InvalidFeedBack": "フォーマットエラー。 例：{0}",
+       "Clear": "消除",
+       "EnterPassword": "パスワードを入力してください",
+-      "ChooseFile": "ファイルを選択してください"
++      "ChooseFile": "ファイルを選択してください",
++      "IslandItemsPick": "アイテムを選択",
++      "IslandItemsAmount": "数量（例：300 または 12.5）",
++      "IslandItemsAdd": "追加 / 更新",
++      "IslandItemsClear": "すべてクリア",
++      "IslandItemsEmpty": "設定されたアイテムはありません",
++      "IslandItemsDelete": "削除",
++      "IslandItemsEdit": "編集",
++      "IslandItemsInvalidItem": "先にアイテムを選択してください",
++      "IslandItemsInvalidAmount": "数量が無効です。0 より大きい数値を入力してください"
+     }
+   }
+ }
+\ No newline at end of file
+diff --git a/module/config/i18n/zh-CN.json b/module/config/i18n/zh-CN.json
+index 183270b8..3312e9c2 100644
+--- a/module/config/i18n/zh-CN.json
++++ b/module/config/i18n/zh-CN.json
+@@ -3097,7 +3097,16 @@
+       "InvalidFeedBack": "格式错误。 示例：{0}",
+       "Clear": "清除",
+       "EnterPassword": "输入密码",
+-      "ChooseFile": "选择文件"
++      "ChooseFile": "选择文件",
++      "IslandItemsPick": "选择物品",
++      "IslandItemsAmount": "数量，如 300 或 12.5",
++      "IslandItemsAdd": "添加 / 更新",
++      "IslandItemsClear": "清空全部",
++      "IslandItemsEmpty": "当前没有配置物品",
++      "IslandItemsDelete": "删除",
++      "IslandItemsEdit": "编辑",
++      "IslandItemsInvalidItem": "请先选择物品",
++      "IslandItemsInvalidAmount": "数量无效，请输入大于 0 的数字"
+     }
+   }
+ }
+\ No newline at end of file
+diff --git a/module/config/i18n/zh-TW.json b/module/config/i18n/zh-TW.json
+index 779b8bb5..c60d11b7 100644
+--- a/module/config/i18n/zh-TW.json
++++ b/module/config/i18n/zh-TW.json
+@@ -3097,7 +3097,16 @@
+       "InvalidFeedBack": "格式錯誤。 示例：{0}",
+       "Clear": "清除",
+       "EnterPassword": "輸入密碼",
+-      "ChooseFile": "選擇檔案"
++      "ChooseFile": "選擇檔案",
++      "IslandItemsPick": "選擇物品",
++      "IslandItemsAmount": "數量，如 300 或 12.5",
++      "IslandItemsAdd": "新增 / 更新",
++      "IslandItemsClear": "清空全部",
++      "IslandItemsEmpty": "目前沒有設定物品",
++      "IslandItemsDelete": "刪除",
++      "IslandItemsEdit": "編輯",
++      "IslandItemsInvalidItem": "請先選擇物品",
++      "IslandItemsInvalidAmount": "數量無效，請輸入大於 0 的數字"
+     }
+   }
+ }
+\ No newline at end of file
+diff --git a/module/island/item_editor.py b/module/island/item_editor.py
+new file mode 100644
+index 00000000..43818f59
+--- /dev/null
++++ b/module/island/item_editor.py
+@@ -0,0 +1,146 @@
++"""Pure helpers behind the island item picker in the web UI.
++
++The island tasks store item amounts as YAML text in config, for example::
++
++    IslandProduction.DailyBufferItems:
++        小麦 (2000): 300
++
++This module converts between that text and editable rows, so the GUI can offer
++a picker with amounts instead of a raw textarea. There is no device, config
++instance or UI dependency here, which keeps it unit testable.
++"""
++from typing import Dict, List, Optional, Tuple
++
++from module.island.data import DIC_ISLAND_ITEM
++from module.island.utils import (
++    item_mapping_to_yaml,
++    load_item_mapping,
++    normalize_item_id,
++)
++
++# Amounts are planned as float, 3 decimals is already beyond game precision.
++AMOUNT_PRECISION = 3
++
++
++def _item_names(item_id) -> Dict[str, str]:
++    item = DIC_ISLAND_ITEM.get(int(item_id))
++    if not item:
++        return {}
++    return item.get('name', {})
++
++
++def item_name_of(item_id, lang: str = 'cn') -> str:
++    """Item name in the given server language, fallback to cn, then to the id."""
++    names = _item_names(item_id)
++    return names.get(lang) or names.get('cn') or str(item_id)
++
++
++def item_label(item_id, lang: str = 'cn') -> str:
++    """Label used both in the picker and as the config key, e.g. `小麦 (2000)`."""
++    return f'{item_name_of(item_id, lang)} ({int(item_id)})'
++
++
++def item_options(lang: str = 'cn') -> List[Tuple[str, str]]:
++    """[(value, label)] sorted by item id, ready for put_select()."""
++    return [(str(item_id), item_label(item_id, lang)) for item_id in sorted(DIC_ISLAND_ITEM)]
++
++
++def parse_amount(raw) -> Optional[float]:
++    """Convert user input to a non-negative amount, None when invalid."""
++    if raw is None or isinstance(raw, bool):
++        return None
++    if isinstance(raw, (int, float)):
++        value = float(raw)
++    else:
++        text = str(raw).strip().replace(',', '').replace('，', '')
++        if not text:
++            return None
++        try:
++            value = float(text)
++        except ValueError:
++            return None
++    if value != value or value in (float('inf'), float('-inf')):
++        return None
++    if value < 0:
++        return None
++    return round(value, AMOUNT_PRECISION)
++
++
++def format_amount(amount) -> str:
++    """Human readable amount, `300` for integers and `300.5` for decimals."""
++    value = parse_amount(amount)
++    if value is None:
++        return ''
++    if float(value).is_integer():
++        return str(int(value))
++    return f'{value:.{AMOUNT_PRECISION}f}'.rstrip('0').rstrip('.')
++
++
++def items_from_text(text) -> Dict[int, float]:
++    """Parse config YAML text into {item_id: amount}.
++
++    Malformed text is treated as empty instead of raising, so a broken config
++    can still be opened and repaired in the GUI. Unknown entries are skipped
++    one by one, the rest of the mapping is still kept.
++    """
++    if not text:
++        return {}
++    try:
++        mapping = load_item_mapping(text, config_name='IslandItems')
++    except Exception:
++        return {}
++    if not isinstance(mapping, dict):
++        return {}
++
++    result = {}
++    for raw_key, raw_amount in mapping.items():
++        try:
++            item_id = normalize_item_id(raw_key)
++        except (ValueError, KeyError, TypeError):
++            continue
++        amount = parse_amount(raw_amount)
++        if amount is not None:
++            result[int(item_id)] = amount
++    return result
++
++
++def is_valid_item_id(item_id) -> bool:
++    try:
++        return int(item_id) in DIC_ISLAND_ITEM
++    except (TypeError, ValueError):
++        return False
++
++
++def items_to_text(items) -> str:
++    """Serialise {item_id: amount} back to the same YAML format the tasks read."""
++    payload = {}
++    for item_id, amount in (items or {}).items():
++        if not is_valid_item_id(item_id):
++            continue
++        value = parse_amount(amount)
++        if value is None:
++            continue
++        # Keep whole numbers as int, same as the planner export.
++        payload[int(item_id)] = int(value) if float(value).is_integer() else value
++    if not payload:
++        return '{}'
++    return item_mapping_to_yaml(payload, use_item_name=True)
++
++
++def set_item(items: Dict[int, float], item_id, amount) -> Dict[int, float]:
++    """Add or update an item, drop it when amount is not positive."""
++    if not is_valid_item_id(item_id):
++        return items
++    value = parse_amount(amount)
++    item_id = int(item_id)
++    if value is None or value <= 0:
++        items.pop(item_id, None)
++    elif float(value).is_integer():
++        items[item_id] = int(value)
++    else:
++        items[item_id] = value
++    return items
++
++
++def sorted_items(items) -> List[Tuple[int, float]]:
++    return [(item_id, items[item_id]) for item_id in sorted(items or {})]
+diff --git a/module/webui/app.py b/module/webui/app.py
+index 53bf3cf8..8c7e094f 100644
+--- a/module/webui/app.py
++++ b/module/webui/app.py
+@@ -373,6 +373,9 @@ class AlasGUI(Frame):
+             output_kwargs["help"] = arg_help
+             # Invalid feedback
+             output_kwargs["invalid_feedback"] = t("Gui.Text.InvalidFeedBack", value)
++            # Server language, used by widgets showing in-game item names
++            if output_kwargs["widget_type"] == "island_items":
++                output_kwargs["lang"] = server
+ 
+             o = put_output(output_kwargs)
+             if o is not None:
+diff --git a/module/webui/widgets.py b/module/webui/widgets.py
+index ad879d9d..1275216b 100644
+--- a/module/webui/widgets.py
++++ b/module/webui/widgets.py
+@@ -7,10 +7,11 @@ from typing import Any, Callable, Dict, Generator, List, Optional, TYPE_CHECKING
+ from pywebio.exceptions import SessionException
+ from pywebio.io_ctrl import Output
+ from pywebio.output import *
++from pywebio.pin import pin
+ from pywebio.session import eval_js, local, run_js
+ from rich.console import ConsoleRenderable
+ 
+-from module.logger import HTMLConsole, Highlighter, WEB_THEME
++from module.logger import HTMLConsole, Highlighter, WEB_THEME, logger
+ from module.webui.lang import t
+ from module.webui.pin import put_checkbox, put_input, put_select, put_textarea
+ from module.webui.process_manager import ProcessManager
+@@ -490,6 +491,153 @@ def put_arg_storage(kwargs: T_Output_Kwargs) -> Optional[Output]:
+     )
+ 
+ 
++def put_arg_island_items(kwargs: T_Output_Kwargs) -> Output:
++    """Item picker for island item mappings.
++
++    The config still stores a YAML text like `小麦 (2000): 300`, so island tasks
++    and the production planner are untouched, but the user picks items from a
++    dropdown instead of typing key-value pairs by hand.
++    """
++    from module.island.item_editor import (
++        format_amount,
++        is_valid_item_id,
++        item_label,
++        item_options,
++        items_from_text,
++        items_to_text,
++        parse_amount,
++        set_item,
++        sorted_items,
++    )
++
++    name: str = kwargs["name"]
++    lang: str = kwargs.get("lang", "cn")
++    _: str = kwargs.pop("invalid_feedback", None)
++    # {item_id: amount}, mutated in place by the callbacks below
++    items = items_from_text(kwargs.get("value"))
++
++    item_pin = f"{name}_Item"
++    amount_pin = f"{name}_Amount"
++    list_scope = f"island_items_list-{name}"
++
++    def save():
++        alasgui: "AlasGUI" = local.gui
++        alasgui.modified_config_queue.put(
++            {"name": ".".join(name.split("_")), "value": items_to_text(items)}
++        )
++
++    def make_row(item_id, amount):
++        def edit_callback(*_):
++            pin[item_pin] = str(item_id)
++            pin[amount_pin] = format_amount(amount)
++
++        def delete_callback(*_):
++            items.pop(int(item_id), None)
++            save()
++            render_rows()
++
++        return put_row(
++            [
++                put_text(item_label(item_id, lang)),
++                put_text(format_amount(amount)).style(
++                    "text-align: right; white-space: nowrap"
++                ),
++                put_row(
++                    [
++                        put_html(
++                            f'<button class="btn btn-outline-primary btn-sm btn-block"'
++                            f' style="margin-right: .25rem">{t("Gui.Text.IslandItemsEdit")}</button>'
++                        ).onclick(edit_callback),
++                        put_html(
++                            f'<button class="btn btn-outline-warning btn-sm btn-block">'
++                            f'{t("Gui.Text.IslandItemsDelete")}</button>'
++                        ).onclick(delete_callback),
++                    ],
++                    size="1fr 1fr",
++                ),
++            ],
++            size="minmax(10rem, 1fr) 4.5rem 9rem",
++        ).style("padding: .15rem 0")
++
++    def collect_rows():
++        return [make_row(item_id, amount) for item_id, amount in sorted_items(items)]
++
++    def render_rows():
++        rows = collect_rows()
++        with use_scope(list_scope, clear=True):
++            if rows:
++                # size='auto': never let the grid squeeze rows with `1fr`
++                put_column(rows, size="auto")
++            else:
++                put_text(t("Gui.Text.IslandItemsEmpty")).style("--arg-help--")
++
++    def add_callback(*_):
++        item_id = pin[item_pin]
++        if not item_id or not is_valid_item_id(item_id):
++            toast(t("Gui.Text.IslandItemsInvalidItem"), duration=2, color="warn")
++            return
++        amount = parse_amount(pin[amount_pin])
++        if amount is None or amount <= 0:
++            toast(t("Gui.Text.IslandItemsInvalidAmount"), duration=2, color="warn")
++            return
++        set_item(items, item_id, amount)
++        save()
++        render_rows()
++        pin[amount_pin] = ""
++
++    def clear_callback(*_):
++        items.clear()
++        save()
++        render_rows()
++
++    options = [{"label": t("Gui.Text.IslandItemsPick"), "value": ""}]
++    options += [
++        {"label": label, "value": value} for value, label in item_options(lang)
++    ]
++
++    initial_rows = collect_rows()
++    if not initial_rows:
++        initial_rows = [
++            put_text(t("Gui.Text.IslandItemsEmpty")).style("--arg-help--")
++        ]
++
++    return put_scope(
++        # Do NOT prefix with `arg_container-`: assets/gui/css/alas-pc.css turns
++        # those scopes into a 2-column grid (`1fr 13rem`), which squeezes this
++        # widget into 13rem and wraps item names one character per line.
++        f"island_items-{name}",
++        [
++            get_title_help(kwargs),
++            put_row(
++                [
++                    put_select(name=item_pin, options=options, value=""),
++                    put_input(
++                        name=amount_pin,
++                        type="text",
++                        placeholder=t("Gui.Text.IslandItemsAmount"),
++                    ),
++                    put_html(
++                        f'<button class="btn btn-primary btn-block">'
++                        f'{t("Gui.Text.IslandItemsAdd")}</button>'
++                    ).onclick(add_callback),
++                ],
++                size="minmax(8rem, 1fr) 8rem 6.5rem",
++            ).style("max-width: 42rem; margin: .25rem 0 .375rem"),
++            put_scope(
++                list_scope, [put_column(initial_rows, size="auto")]
++            ).style(
++                "max-width: 42rem; max-height: 22rem; overflow-y: auto;"
++                " border: 1px solid rgba(128, 128, 128, .35);"
++                " border-radius: .25rem; padding: .25rem .625rem"
++            ),
++            put_html(
++                f'<button class="btn btn-outline-warning btn-sm">'
++                f'{t("Gui.Text.IslandItemsClear")}</button>'
++            ).onclick(clear_callback).style("margin-top: .375rem"),
++        ],
++    )
++
++
+ _widget_type_to_func: Dict[str, Callable] = {
+     "input": put_arg_input,
+     "lock": put_arg_state,
+@@ -500,11 +648,20 @@ _widget_type_to_func: Dict[str, Callable] = {
+     "storage": put_arg_storage,
+     "state": put_arg_state,
+     "stored": put_arg_stored,
++    "island_items": put_arg_island_items,
+ }
+ 
+ 
+ def put_output(output_kwargs: T_Output_Kwargs) -> Optional[Output]:
+-    return _widget_type_to_func[output_kwargs["widget_type"]](output_kwargs)
++    widget_type = output_kwargs.get("widget_type")
++    func = _widget_type_to_func.get(widget_type)
++    if func is None:
++        # Fallback instead of raising KeyError: a config generated by a newer
++        # version must not break page rendering of the whole task group.
++        logger.warning(f"Unknown widget type: {widget_type}, fallback to textarea")
++        func = put_arg_textarea
++    return func(output_kwargs)
++
+ 
+ 
+ def get_loading_style(shape: str, fill: bool) -> str:

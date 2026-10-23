@@ -9604,19 +9604,19 @@
     },
     "IslandProduction": {
       "HardFloorItems": {
-        "type": "textarea",
+        "type": "island_items",
         "value": "{}"
       },
       "DailyBufferItems": {
-        "type": "textarea",
+        "type": "island_items",
         "value": "{}"
       },
       "ManualBufferItems": {
-        "type": "textarea",
+        "type": "island_items",
         "value": "{}"
       },
       "IdleAccumulatingItems": {
-        "type": "textarea",
+        "type": "island_items",
         "value": "{}"
       },
       "SkipBufferSurplus": {
@@ -9673,6 +9673,51 @@
       "StuckSeasonOrderId": {
         "type": "input",
         "value": 0
+      }
+    },
+    "Storage": {
+      "Storage": {
+        "type": "storage",
+        "value": {},
+        "valuetype": "ignore",
+        "display": "disabled"
+      }
+    }
+  },
+  "IslandTransport": {
+    "Scheduler": {
+      "Enable": {
+        "type": "checkbox",
+        "value": false,
+        "option": [
+          true,
+          false
+        ]
+      },
+      "NextRun": {
+        "type": "datetime",
+        "value": "2020-01-01 00:00:00",
+        "validate": "datetime"
+      },
+      "Command": {
+        "type": "input",
+        "value": "IslandTransport",
+        "display": "hide"
+      },
+      "SuccessInterval": {
+        "type": "input",
+        "value": 0,
+        "display": "hide"
+      },
+      "FailureInterval": {
+        "type": "input",
+        "value": 120,
+        "display": "hide"
+      },
+      "ServerUpdate": {
+        "type": "input",
+        "value": "03:00, 18:00",
+        "display": "hide"
       }
     },
     "Storage": {
@@ -9868,6 +9913,14 @@
       }
     },
     "IslandRestaurant": {
+      "WaitressLock": {
+        "type": "checkbox",
+        "value": true
+      },
+      "WaitForFullMenu": {
+        "type": "checkbox",
+        "value": true
+      },
       "KoiGrade": {
         "type": "select",
         "value": "bronze",

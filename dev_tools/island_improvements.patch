@@ -1,0 +1,850 @@
+--- AzurLaneAutoScript/module/config/argument/args.json	2026-10-23 12:08:31.333723000 +0800
++++ AzurLaneAutoScript-dev/module/config/argument/args.json	2026-10-23 12:42:38.047674700 +0800
+@@ -9868,6 +9868,10 @@
+       }
+     },
+     "IslandRestaurant": {
++      "WaitressLock": {
++        "type": "checkbox",
++        "value": true
++      },
+       "KoiGrade": {
+         "type": "select",
+         "value": "bronze",
+--- AzurLaneAutoScript/module/config/argument/argument.yaml	2026-10-23 12:08:17.619451400 +0800
++++ AzurLaneAutoScript-dev/module/config/argument/argument.yaml	2026-10-23 12:42:32.548592100 +0800
+@@ -788,6 +788,7 @@
+ IslandFreebie:
+   Share: true
+ IslandRestaurant:
++  WaitressLock: true
+   KoiGrade:
+     value: bronze
+     option: [ bronze, silver, gold, diamond ]
+--- AzurLaneAutoScript/module/config/config_generated.py	2026-10-23 12:08:31.418492000 +0800
++++ AzurLaneAutoScript-dev/module/config/config_generated.py	2026-10-23 12:42:38.119817800 +0800
+@@ -460,6 +460,7 @@
+     IslandFreebie_Share = True
+ 
+     # Group `IslandRestaurant`
++    IslandRestaurant_WaitressLock = True
+     IslandRestaurant_KoiGrade = 'bronze'  # bronze, silver, gold, diamond
+     IslandRestaurant_KoiWaitress1 = 'any'  # none, any, Chao_Ho, Chang_Feng
+     IslandRestaurant_KoiWaitress2 = 'none'  # none, any, Chao_Ho, Chang_Feng
+--- AzurLaneAutoScript/module/config/i18n/en-US.json	2026-10-23 12:08:31.491464700 +0800
++++ AzurLaneAutoScript-dev/module/config/i18n/en-US.json	2026-10-23 13:08:37.296875000 +0800
+@@ -2700,6 +2700,10 @@
+       "name": "Restaurant Management",
+       "help": ""
+     },
++    "WaitressLock": {
++      "name": "Lock Waitresses",
++      "help": "Applies when the same waitress is assigned to several restaurants: if she is working in another restaurant and both restaurants still need a shift today and another shift still fits after she finishes, wait for her shift to end before opening this one; if it does not fit, replace her. If her other restaurant is resting (not doing business today), pick her as usual. A shift that crosses 00:00 is always waited out instead of opening a late-night round."
++    },
+     "KoiGrade": {
+       "name": "Golden Koi Restaurant Grade",
+       "help": "",
+--- AzurLaneAutoScript/module/config/i18n/ja-JP.json	2026-10-23 12:08:31.534772800 +0800
++++ AzurLaneAutoScript-dev/module/config/i18n/ja-JP.json	2026-10-23 13:08:42.258658000 +0800
+@@ -2700,6 +2700,10 @@
+       "name": "グルメ運営",
+       "help": ""
+     },
++    "WaitressLock": {
++      "name": "店員を固定",
++      "help": "同じ店員が複数のレストランに割り当てられている場合に適用されます：彼女が別のレストランで勤務中で、本日どちらのレストランも営業が必要かつ勤務終了後にもう1回分の営業が間に合う場合は、勤務終了を待ってから開始します。間に合わない場合は別の店員に交代します。もう一方のレストランが休業中（本日営業しない）場合は通常どおり彼女を選択します。今回の勤務が 00:00 を超える場合は必ず待機し、深夜の営業を無理に開始しません。"
++    },
+     "KoiGrade": {
+       "name": "有魚飯店のランク",
+       "help": "",
+--- AzurLaneAutoScript/module/config/i18n/zh-CN.json	2026-10-23 12:08:31.443487900 +0800
++++ AzurLaneAutoScript-dev/module/config/i18n/zh-CN.json	2026-10-23 13:08:30.325406700 +0800
+@@ -2700,6 +2700,10 @@
+       "name": "餐厅管理",
+       "help": ""
+     },
++    "WaitressLock": {
++      "name": "锁定店员",
++      "help": "同一个店员被多家餐厅同时安排时生效：若她正在另一家餐厅经营，且今天两家餐厅都还要营业、她下班后仍来得及再排一场，就等她结束再来本餐厅；时间来不及则直接换人。若她所在的另一家餐厅正在休息（今天不营业），则照常选择她。她这次经营如果会跨过 00:00，则一律等她，不抢开深夜的一场。"
++    },
+     "KoiGrade": {
+       "name": "有鱼餐馆等级",
+       "help": "",
+--- AzurLaneAutoScript/module/config/i18n/zh-TW.json	2026-10-23 12:08:31.579337600 +0800
++++ AzurLaneAutoScript-dev/module/config/i18n/zh-TW.json	2026-10-23 13:08:33.770567300 +0800
+@@ -2700,6 +2700,10 @@
+       "name": "餐廳管理",
+       "help": ""
+     },
++    "WaitressLock": {
++      "name": "鎖定店員",
++      "help": "同一個店員被多家餐廳同時安排時生效：若她正在另一家餐廳經營，且今天兩家餐廳都還要營業、她下班後仍來得及再排一場，就等她結束再來本餐廳；時間來不及則直接換人。若她所在的另一家餐廳正在休息（今天不營業），則照常選擇她。她這次經營如果會跨過 00:00，則一律等她，不搶開深夜的一場。"
++    },
+     "KoiGrade": {
+       "name": "有魚餐館等級",
+       "help": "",
+--- AzurLaneAutoScript/module/island/business.py	2026-10-18 20:20:43.845551800 +0800
++++ AzurLaneAutoScript-dev/module/island/business.py	2026-10-23 13:08:12.153379900 +0800
+@@ -6,7 +6,11 @@
+ from module.island.assets import *
+ from module.island.utils import production_place_name_with_id
+ from module.island_handler.assets import ISLAND_RESTAURANT_ANIMATION_CHECK
+-from module.island_handler.restaurant import IslandRestaurant, WaitressOccupied
++from module.island_handler.restaurant import (
++    IslandRestaurant,
++    WaitressLocked,
++    WaitressOccupied,
++)
+ from module.island_handler.restaurant_config import (
+     RESTAURANT_IDS,
+     get_waitress_slots,
+@@ -129,11 +133,49 @@
+         elif self.index >= len(self.business_grid_shifted.buttons) and self.shifted:
+             logger.info("No more restaurants")
+ 
++    def prefetch_restaurant_states(self):
++        """Read the state and the finish time of every restaurant before dispatching.
++
++        The waitress lock has to know whether a restaurant sharing a waitress is
++        still running today (and when it ends), and that restaurant may be listed
++        after the current one.
++        """
++        states = {}
++        finish_times = {}
++        self.restaurant_swipe_to_top()
++        seen = set()
++        while len(seen) < len(RESTAURANT_IDS):
++            button = self.current_restaurant_button()
++            if button is None:
++                break
++            restaurant_id = self.get_restaurant_id(button)
++            if restaurant_id is not None and restaurant_id not in seen:
++                seen.add(restaurant_id)
++                entrance_button = button.crop(BUSINESS_ENTRANCE_AREA)
++                if self.is_restaurant_running(entrance_button):
++                    states[restaurant_id] = 'running'
++                    finish_times[restaurant_id] = datetime.now() + self.get_remain_time(button)
++                elif self.is_restaurant_resting(entrance_button):
++                    states[restaurant_id] = 'resting'
++                else:
++                    states[restaurant_id] = 'ready'
++            self.next_restaurant()
++        self.restaurant_swipe_to_top()
++        if finish_times:
++            logger.info(
++                "Running restaurants: " + ", ".join(
++                    f"{production_place_name_with_id(restaurant_id)} until {finish_time}"
++                    for restaurant_id, finish_time in sorted(finish_times.items())
++                )
++            )
++        return states, finish_times
++
+     def run(self):
+         self.ui_ensure(page_island_manage)
+         self.island_manage_side_navbar_ensure(upper=2)
+         self.handle_restaurant_popup()
+         self.restaurant_swipe_to_top()
++        self.restaurant_states, self.restaurant_finish_times = self.prefetch_restaurant_states()
+         unchecked_restaurants = list(RESTAURANT_IDS)
+         next_run_time = {
+             601: get_server_next_update('00:00') if not self.skip_restaurant[601] else datetime.now() + timedelta(days=3),
+@@ -166,16 +208,21 @@
+             if self.is_restaurant_running(entrance_button):
+                 remain_time = self.get_remain_time(button)
+                 next_run_time[restaurant_id] = datetime.now() + remain_time
++                self.restaurant_finish_times[restaurant_id] = next_run_time[restaurant_id]
++                self.restaurant_states[restaurant_id] = 'running'
+                 logger.info(f"Restaurant {restaurant} is running, remaining time: {remain_time}")
+                 unchecked_restaurants.remove(restaurant_id)
+                 self.next_restaurant()
+                 continue
+             if self.is_restaurant_resting(entrance_button):
+                 logger.info(f"Restaurant {restaurant} is resting")
++                self.restaurant_states[restaurant_id] = 'resting'
+                 unchecked_restaurants.remove(restaurant_id)
+                 self.next_restaurant()
+                 continue
+             logger.info(f"Restaurant {restaurant} is ready")
++            self.restaurant_states[restaurant_id] = 'ready'
++            self.restaurant_finish_times.pop(restaurant_id, None)
+             for _ in self.loop():
+                 if self.appear(page_island_manage.check_button, offset=(20, 20), interval=1):
+                     self.device.click(entrance_button)
+@@ -190,6 +237,15 @@
+                 next_run_time[restaurant_id] = datetime.now() + timedelta(hours=8)
+                 unchecked_restaurants.remove(restaurant_id)
+                 success = False
++            except WaitressLocked as e:
++                # Both restaurants still want a shift today and her current one
++                # ends in time, so run this restaurant right after she is free.
++                # A shift that crosses 00:00 is waited out as well: opening now
++                # would only burn a late-night round.
++                logger.info(f"{e}, will start this restaurant when she is free")
++                next_run_time[restaurant_id] = e.finish_time + timedelta(minutes=1)
++                unchecked_restaurants.remove(restaurant_id)
++                success = False
+             self.ui_back(page_island_manage.check_button)
+             for _ in self.loop(timeout=0.8, skip_first=False):
+                 if self.appear(page_island_manage.check_button, offset=(0, 20)):
+@@ -203,6 +259,8 @@
+                 unchecked_restaurants.remove(restaurant_id)
+             if success:
+                 next_run_time[restaurant_id] = datetime.now() + timedelta(hours=8)
++                self.restaurant_finish_times[restaurant_id] = next_run_time[restaurant_id]
++                self.restaurant_states[restaurant_id] = 'running'
+                 # Since dealt restaurants will be moved to the bottom,
+                 # we can directly check the next one without swiping
+         self.config.task_delay(target=min(next_run_time.values()))
+--- AzurLaneAutoScript/module/island/collect.py	2026-10-23 01:12:19.871282600 +0800
++++ AzurLaneAutoScript-dev/module/island/collect.py	2026-10-23 12:40:58.148309900 +0800
+@@ -11,6 +11,15 @@
+     origin=(832, 227), delta=(95, 0), button_shape=(74, 74), grid_shape=(3, 1)
+ )
+ 
++# Adaptability grade read from the dock card by GradeScanner, best first.
++# Unknown grades (OCR miss) go last so a readable card always wins.
++GRADE_PRIORITY = {'S': 0, 'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5}
++GRADE_UNKNOWN = len(GRADE_PRIORITY)
++
++
++def grade_priority(character):
++    return GRADE_PRIORITY.get(character.grade, GRADE_UNKNOWN)
++
+ 
+ class IslandCollect(IslandDock):
+     def collect_location_unselected_buttons(self):
+@@ -97,6 +106,15 @@
+                 logger.warning(f'No candidate found for workslot {workslot}, canceling collect')
+                 self.island_dock_quit()
+                 return False
++            # Collect output scales with adaptability, so spend the best grade first.
++            candidates.sort(key=grade_priority)
++            logger.info(
++                f'Collect candidates for workslot {workslot}: '
++                + ', '.join(
++                    f'{candidate.identity}({candidate.grade or "unknown"})'
++                    for candidate in candidates
++                )
++            )
+             button = candidates[0].button
+             self.island_dock_select_one(button)
+             self.island_dock_select_confirm(check_button=[ISLAND_COLLECT_START, ISLAND_COLLECT_START_UNAVAILABLE])
+--- AzurLaneAutoScript/module/island/production.py	2026-10-23 01:12:19.877994300 +0800
++++ AzurLaneAutoScript-dev/module/island/production.py	2026-10-23 12:41:50.328664500 +0800
+@@ -6,12 +6,16 @@
+ from module.base.utils import random_rectangle_vector_opted
+ from module.exception import RequestHumanTakeover
+ from module.island.assets import *
+-from module.island.data import DIC_ISLAND_PRODUCTION_PLACE, DIC_ISLAND_SLOT
++from module.island.data import DIC_ISLAND_PRODUCTION_PLACE, DIC_ISLAND_RECIPE, DIC_ISLAND_SLOT
+ from module.island.utils import item_name_with_id, production_place_name_with_id
+ from module.island_handler.dock import IslandDock
+ from module.island_handler.dock_scanner import CharacterScanner
+ from module.island_handler.exchange import FISH_MEAT_SOURCES
+-from module.island_handler.recipe import IslandProductionRestart, IslandRecipe
++from module.island_handler.recipe import (
++    IslandProductionRestart,
++    IslandRecipe,
++    get_recipe_product_id,
++)
+ from module.logger import logger
+ from module.map_detection.utils import Points
+ from module.ui.page import page_island, page_island_manage
+@@ -216,6 +220,8 @@
+                         self.claimed_slots.add(slot_id)
+                     if slot_id in self.slot_finish_time:
+                         del self.slot_finish_time[slot_id]
++                    # Finished slots are no longer in flight, forget their plan.
++                    self.slot_plan.pop(slot_id, None)
+ 
+     def claim_all_rewards(self):
+         logger.hr("Claim Production Rewards", level=2)
+@@ -226,6 +232,73 @@
+             if not self.next_page():
+                 break
+ 
++    def record_slot_plan(self, slot_id):
++        """Remember what a slot was told to produce, so it counts as stock later."""
++        recipe = getattr(self, 'last_started_recipe', None)
++        if not recipe:
++            return
++        recipe_id, batch_count = recipe
++        if not isinstance(batch_count, (int, float)) or batch_count in (float('inf'), float('-inf')):
++            logger.warning(
++                f'Unknown batch count {batch_count} for slot {slot_id}, skipping slot plan'
++            )
++            return
++        product_id = get_recipe_product_id(recipe_id)
++        amount = DIC_ISLAND_RECIPE[recipe_id]['commission_product'][product_id] * batch_count
++        if float(amount).is_integer():
++            amount = int(amount)
++        if amount <= 0:
++            return
++        self.slot_plan[slot_id] = {product_id: amount}
++        logger.info(
++            f'Slot {slot_id} is producing {amount} {item_name_with_id(product_id)}, '
++            f'committed stock of this item: {self.pending_output.get(product_id, 0)}'
++        )
++
++    def restore_slot_plan(self):
++        """Seed committed stock from slots that are still producing.
++
++        Slots keep running between task runs, so their products are missing from
++        the scanned warehouse stock. Restoring the persisted plan keeps buffer
++        surplus and idle accumulating from dispatching the same items again.
++        """
++        raw = self.config.cross_get(
++            "IslandProduction.Storage.Storage.SlotItems", default={}
++        ) or {}
++        self.slot_plan = {}
++        try:
++            for raw_slot_id, raw_items in raw.items():
++                slot_id = int(raw_slot_id)
++                if slot_id in self.claimed_slots:
++                    continue
++                plan = {}
++                for raw_item_id, raw_amount in (raw_items or {}).items():
++                    item_id = int(raw_item_id)
++                    amount = float(raw_amount)
++                    if amount <= 0:
++                        continue
++                    plan[item_id] = amount
++                    self.pending_output[item_id] = (
++                        self.pending_output.get(item_id, 0) + amount
++                    )
++                if plan:
++                    self.slot_plan[slot_id] = plan
++        except (AttributeError, TypeError, ValueError) as e:
++            logger.warning(f'Ignoring malformed island slot plan in config: {e}')
++            self.slot_plan = {}
++            self._pending_output = {}
++            return
++        if self.slot_plan:
++            logger.info(
++                'Production slots still running: ' + ', '.join(
++                    f'{slot_id}: ' + '/'.join(
++                        f'{amount} {item_name_with_id(item_id)}'
++                        for item_id, amount in plan.items()
++                    )
++                    for slot_id, plan in sorted(self.slot_plan.items())
++                )
++            )
++
+     def dispatch_slot(self, slot_id, slot_button, worker='manjuu'):
+         if slot_id in DIC_ISLAND_PRODUCTION_PLACE[102]['slot']:
+             del_cached_property(super(), 'recipe_id_sequence')
+@@ -256,6 +329,7 @@
+         if target_time is not None:
+             target_time = target_time.replace(microsecond=0)
+             self.slot_finish_time[slot_id] = target_time
++            self.record_slot_plan(slot_id)
+             self.ensure_island_production_page()
+         else:
+             logger.warning(f'Failed to start production for {production_slot_name_with_id(slot_id)}')
+@@ -353,6 +427,9 @@
+         slot_finish_time = self.config.cross_get("IslandProduction.Storage.Storage.SlotFinishTime", default={})
+         self.slot_finish_time = {int(k): datetime.fromisoformat(v) for k, v in slot_finish_time.items()}
+         self.fish_meat_stock = {}
++        # Committed stock is rebuilt from the persisted per-slot plan below.
++        self._pending_output = {}
++        self.slot_plan = {}
+         self.claim_all_rewards()
+         yaml_text = self.config.cross_get("IslandProduction.IslandProduction.DailyBufferItems", "")
+         if not yaml_text or yaml_text == "{}":
+@@ -360,12 +437,17 @@
+             raise RequestHumanTakeover('No daily buffer items found in config, please run Island Production Planner first')
+         if self.claimed_slots.intersection(DIC_ISLAND_PRODUCTION_PLACE[201]['slot']):
+             self.exchange_surplus_fish()
++        self.restore_slot_plan()
+         self.dispatch_all()
+         next_run_time = list(self.slot_finish_time.values())
+         with self.config.multi_set():
+             sorted_items = sorted(self.slot_finish_time.items(), key=lambda kv: (kv[1], kv[0]))
+             slot_finish_time = {k: v.isoformat(sep=' ') for k, v in sorted_items}
+             self.config.cross_set("IslandProduction.Storage.Storage.SlotFinishTime", slot_finish_time)
++            self.config.cross_set("IslandProduction.Storage.Storage.SlotItems", {
++                str(slot_id): {str(item_id): amount for item_id, amount in plan.items()}
++                for slot_id, plan in sorted(self.slot_plan.items())
++            })
+             if next_run_time:
+                 self.config.task_delay(target=next_run_time)
+             else:
+--- AzurLaneAutoScript/module/island_handler/recipe.py	2026-10-23 01:12:19.944596400 +0800
++++ AzurLaneAutoScript-dev/module/island_handler/recipe.py	2026-10-23 12:41:28.456069200 +0800
+@@ -383,6 +383,18 @@
+     def all_recipe_stocks(self):
+         return self.scan_all_recipe_stocks()
+ 
++    @property
++    def pending_output(self) -> dict:
++        """{product_id: amount} committed to production slots but not harvested yet.
++
++        Scanned recipe stocks only contain the warehouse, so without this the
++        surplus and idle-accumulating checks would keep dispatching items that
++        are already being produced.
++        """
++        if getattr(self, '_pending_output', None) is None:
++            self._pending_output = {}
++        return self._pending_output
++
+     @cached_property
+     def recipe_id_sequence(self):
+         return self.get_recipe_id_sequence_to_run()
+@@ -467,10 +479,14 @@
+         fish_buffer_rates = self.get_fish_buffer_rates(
+             hard_floor_items_dict, reserve_items_dict, daily_buffer_items_dict, task_target_items_dict)
+         self.recipe_info_by_id = {}
+-        for recipe_id, stock in stocks_dict.items():
++        pending_output = self.pending_output
++        for recipe_id, scanned_stock in stocks_dict.items():
+             recipe_product = DIC_ISLAND_RECIPE[recipe_id]['commission_product']
+             product_id = get_recipe_product_id(recipe_id)
+             batch_size = recipe_product[product_id]
++            # In-flight production counts as stock: it is not in the warehouse
++            # yet, but it must not be produced a second time.
++            stock = scanned_stock + pending_output.get(product_id, 0)
+             daily_buffer_width = daily_buffer_items_dict.get(product_id, 0)
+             if product_id in fish_buffer_rates:
+                 daily_buffer_width = ceil_with_epsilon(daily_buffer_width * fish_buffer_rates[product_id])
+@@ -912,35 +928,53 @@
+                 f'Recipe {format_recipe_with_product(recipe_id)} started with amount '
+                 f'{"max" if real_count == float("inf") else real_count}, remain time: {remain_time}'
+             )
++            # Read by IslandProduction.dispatch_slot to remember what each slot
++            # is producing while it runs.
++            self.last_started_recipe = (recipe_id, real_count)
+             return remain_time, real_count
+         else:
+             logger.warning('Failed to get recipe remain time, recipe may not have started successfully')
+             return None
+ 
++    def _refresh_recipe_info_stock(self):
++        """Recompute info.stock as scanned stock plus committed production."""
++        pending_output = self.pending_output
++        self.recipe_info_by_id = {
++            recipe_id: info._replace(
++                stock=self.all_recipe_stocks.get(recipe_id, info.stock)
++                + pending_output.get(get_recipe_product_id(recipe_id), 0)
++            )
++            for recipe_id, info in self.recipe_info_by_id.items()
++        }
++
+     def update_recipe_id_sequence_and_stock(self, recipe_id, batch_count):
+         recipe_cost = DIC_ISLAND_RECIPE[recipe_id]['commission_cost']
+         consumed_items = {item_id: amount * batch_count for item_id, amount in recipe_cost.items()}
+-        for old_recipe_id, info in self.recipe_info_by_id.items():
+-            product_id = get_recipe_product_id(old_recipe_id)
+-            if old_recipe_id == recipe_id:
+-                new_stock = info.stock + info.batch_size * batch_count
+-                logger.info(
+-                    f'Updated recipe {format_recipe_with_product(recipe_id)} stock '
+-                    f'from {info.stock} to {new_stock} '
+-                    f'after running recipe for {batch_count} batch(es)'
+-                )
+-            elif product_id in consumed_items:
+-                new_stock = info.stock - consumed_items[product_id]
+-                logger.info(
+-                    f'Updated recipe {format_recipe_with_product(old_recipe_id)} stock '
+-                    f'from {info.stock} to {new_stock} after consuming '
+-                    f'{consumed_items[product_id]} {item_name_with_id(product_id)} for '
+-                    f'recipe {format_recipe_with_product(recipe_id)}'
+-                )
+-            else:
++        product_id = get_recipe_product_id(recipe_id)
++        produced = DIC_ISLAND_RECIPE[recipe_id]['commission_product'][product_id] * batch_count
++        if float(produced).is_integer():
++            produced = int(produced)
++        self.pending_output[product_id] = self.pending_output.get(product_id, 0) + produced
++        logger.info(
++            f'Committed {produced} {item_name_with_id(product_id)} in production, '
++            f'total committed stock: {self.pending_output[product_id]}'
++        )
++        # Ingredients are consumed right away when production starts, so the
++        # scanned stock baseline is reduced for the rebuilt sequence.
++        for old_recipe_id in list(self.recipe_info_by_id):
++            consumed_product = get_recipe_product_id(old_recipe_id)
++            if consumed_product not in consumed_items:
+                 continue
+-            self.recipe_info_by_id[old_recipe_id] = info._replace(stock=new_stock)
++            old_stock = self.all_recipe_stocks.get(old_recipe_id, 0)
++            new_stock = old_stock - consumed_items[consumed_product]
++            logger.info(
++                f'Updated recipe {format_recipe_with_product(old_recipe_id)} stock '
++                f'from {old_stock} to {new_stock} after consuming '
++                f'{consumed_items[consumed_product]} {item_name_with_id(consumed_product)} for '
++                f'recipe {format_recipe_with_product(recipe_id)}'
++            )
+             self.all_recipe_stocks[old_recipe_id] = new_stock
++        self._refresh_recipe_info_stock()
+         self.recipe_id_sequence = self._build_recipe_id_sequence_to_run()
+ 
+     def run(self, slot_id=None):
+@@ -949,6 +983,7 @@
+             target_time (datetime): timestamp of when the recipe will finish, or None if failed to run any recipe
+         """
+         self.working_slot_id = slot_id
++        self.last_started_recipe = None
+         del_cached_property(self, 'recipe_grid')
+         del_cached_property(self, 'recipe_ids')
+         while self.recipe_id_sequence:
+--- AzurLaneAutoScript/module/island_handler/restaurant.py	2026-10-18 20:20:43.847457400 +0800
++++ AzurLaneAutoScript-dev/module/island_handler/restaurant.py	2026-10-23 13:07:47.566855300 +0800
+@@ -38,6 +38,9 @@
+ from module.statistics.item import Item, ItemGrid
+ 
+ RESTAURANT_SWIPE_AREA = (583, 208, 1023, 400)
++# One restaurant shift lasts 8 hours in game, the same assumption ``IslandBusiness``
++# uses when it schedules the next round.
++RESTAURANT_SHIFT_LENGTH = timedelta(hours=8)
+ ISLAND_RESTAURANT_ITEM_ORDER_PRICE = {
+     DIC_ISLAND_ITEM[item_id]['name']['en'].replace(' ', '_'): {
+         'id': item_id,
+@@ -62,6 +65,19 @@
+     pass
+ 
+ 
++class WaitressLocked(Exception):
++    """A named waitress is still employed by another restaurant until `finish_time`.
++
++    Unlike WaitressOccupied, the end of her current shift is known, so the
++    restaurant can be delayed to that moment instead of replacing her.
++    """
++
++    def __init__(self, message, waitress=None, finish_time=None):
++        super().__init__(message)
++        self.waitress = waitress
++        self.finish_time = finish_time
++
++
+ class RestaurantItem(Item):
+     IMAGE_SHAPE = (83, 87)
+ 
+@@ -123,6 +139,9 @@
+ 
+ class IslandRestaurant(IslandDock):
+     working_restaurant_id = None
++    # Filled by IslandBusiness before dispatching: {restaurant_id: 'running'|'resting'|'ready'}
++    restaurant_states = {}
++    restaurant_finish_times = {}
+ 
+     @cached_property
+     def restaurant_capacity(self):
+@@ -354,6 +373,59 @@
+             )
+         return sorted(lst - current_waitresses)
+ 
++    @property
++    def waitress_lock_enabled(self):
++        return bool(self.config.cross_get(
++            "IslandBusiness.IslandRestaurant.WaitressLock", True
++        ))
++
++    def locked_waitress_status(self, waitress):
++        """Where ``waitress`` is currently working, and whether she is idle.
++
++        A named waitress can be configured for several restaurants at once.  She
++        is only really "unavailable" while one of those restaurants is running,
++        so a restaurant that is resting (or has not opened yet today) must not
++        make her look occupied.
++
++        Returns:
++            (status, restaurant_id, finish_time)
++            status: 'running'  she is employed by ``restaurant_id``,
++                    'idle'     no configured restaurant is running, she is free,
++                    'unknown'  the state of a configured restaurant is unknown.
++        """
++        states = getattr(self, 'restaurant_states', None) or {}
++        finish_times = getattr(self, 'restaurant_finish_times', None) or {}
++        idle = True
++        for restaurant_id in RESTAURANT_IDS:
++            if restaurant_id == self.working_restaurant_id:
++                continue
++            if waitress not in get_selected_named_waitresses(
++                    get_waitress_slots(self.config, restaurant_id)):
++                continue
++            state = states.get(restaurant_id)
++            if state == 'running':
++                return 'running', restaurant_id, finish_times.get(restaurant_id)
++            if state not in ('resting', 'ready'):
++                idle = False
++        if idle:
++            return 'idle', None, None
++        return 'unknown', None, None
++
++    @staticmethod
++    def should_lock_waitress(finish_time):
++        """Decide whether this restaurant should wait for her current shift.
++
++        Waiting only pays off while both restaurants still want a shift today
++        and another full shift still fits before the daily reset.  A shift that
++        already runs past 00:00 is always waited out: opening the restaurant
++        right away would only burn a late-night shift, and she would be free
++        again in the new day anyway.
++        """
++        next_update = get_server_next_update("00:00")
++        if finish_time >= next_update:
++            return True
++        return finish_time + RESTAURANT_SHIFT_LENGTH <= next_update
++
+     def restaurant_running(self):
+         return self.appear(ISLAND_RESTAURANT_RUNNING, offset=self._restaurant_offset)
+ 
+@@ -386,12 +458,51 @@
+         restaurant = production_place_name_with_id(self.working_restaurant_id)
+         for waitress in named_waitresses:
+             if waitress in unavailable_waitress_list:
+-                logger.warning(
+-                    f"Waitress {waitress} is already assigned to another restaurant, "
+-                    f"skip it for restaurant {restaurant}"
+-                )
+-                unavailable_waitress_list.remove(waitress)
+-                continue
++                status, employer_id, locked_until = self.locked_waitress_status(waitress)
++                if status == 'idle':
++                    # No configured restaurant is running her, so she is not
++                    # occupied at all; pick her normally instead of replacing her.
++                    logger.info(
++                        f"Waitress {waitress} is not employed by any running restaurant, "
++                        f"treat her as free for restaurant {restaurant}"
++                    )
++                    unavailable_waitress_list.remove(waitress)
++                elif not self.waitress_lock_enabled:
++                    logger.warning(
++                        f"Waitress {waitress} is already assigned to another restaurant, "
++                        f"skip it for restaurant {restaurant}"
++                    )
++                    unavailable_waitress_list.remove(waitress)
++                    continue
++                elif status == 'running' and locked_until is not None:
++                    employer = production_place_name_with_id(employer_id)
++                    if self.should_lock_waitress(locked_until):
++                        logger.info(
++                            f"Waitress {waitress} is locked by {employer} until "
++                            f"{locked_until}, delay restaurant {restaurant} for her "
++                            f"instead of replacing her"
++                        )
++                        self.ui_back(check_button=self.is_in_island_restaurant)
++                        raise WaitressLocked(
++                            f"Restaurant {restaurant} waits for waitress {waitress} "
++                            f"until {locked_until}",
++                            waitress=waitress,
++                            finish_time=locked_until,
++                        )
++                    logger.warning(
++                        f"Waitress {waitress} is employed by {employer} until "
++                        f"{locked_until}, too late to fit another shift before "
++                        f"00:00, replace her for restaurant {restaurant}"
++                    )
++                    unavailable_waitress_list.remove(waitress)
++                    continue
++                else:
++                    logger.warning(
++                        f"Waitress {waitress} is already assigned to another restaurant, "
++                        f"skip it for restaurant {restaurant}"
++                    )
++                    unavailable_waitress_list.remove(waitress)
++                    continue
+             candidate = self.island_dock_find_character(waitress)
+             if candidate is not None and candidate.status == 'free':
+                 self.island_dock_select_one(candidate.button)
+--- AzurLaneAutoScript/module/webui/widgets.py	2026-10-23 12:16:44.166343900 +0800
++++ AzurLaneAutoScript-dev/module/webui/widgets.py	2026-10-23 12:40:49.950463500 +0800
+@@ -2,6 +2,7 @@
+ import json
+ import random
+ import string
++from html import escape
+ from typing import Any, Callable, Dict, Generator, List, Optional, TYPE_CHECKING, Union
+ 
+ from pywebio.exceptions import SessionException
+@@ -520,6 +521,13 @@
+     amount_pin = f"{name}_Amount"
+     list_scope = f"island_items_list-{name}"
+ 
++    ROW_HEIGHT = "1.7rem"
++    ROW_BUTTON_STYLE = (
++        f"height: {ROW_HEIGHT}; min-height: {ROW_HEIGHT}; padding: 0 .4rem;"
++        " margin: 0; display: flex; align-items: center;"
++        " justify-content: center; font-size: .8125rem; line-height: 1;"
++    )
++
+     def save():
+         alasgui: "AlasGUI" = local.gui
+         alasgui.modified_config_queue.put(
+@@ -536,28 +544,41 @@
+             save()
+             render_rows()
+ 
++        # A fixed button height keeps the edit and delete buttons the same
++        # size, and zero vertical padding keeps rows compact: put_text() renders
++        # a <p> whose default bottom margin was adding the extra row spacing.
++        label = escape(item_label(item_id, lang))
+         return put_row(
+             [
+-                put_text(item_label(item_id, lang)),
+-                put_text(format_amount(amount)).style(
+-                    "text-align: right; white-space: nowrap"
++                put_html(
++                    f'<div class="island-item-name" title="{label}"'
++                    f' style="overflow: hidden; text-overflow: ellipsis;'
++                    f' white-space: nowrap; line-height: {ROW_HEIGHT}">{label}</div>'
++                ),
++                put_html(
++                    f'<div class="island-item-amount"'
++                    f' style="text-align: right; white-space: nowrap;'
++                    f' padding-right: .5rem; font-variant-numeric: tabular-nums;'
++                    f' line-height: {ROW_HEIGHT}">{format_amount(amount)}</div>'
+                 ),
+                 put_row(
+                     [
+                         put_html(
+-                            f'<button class="btn btn-outline-primary btn-sm btn-block"'
+-                            f' style="margin-right: .25rem">{t("Gui.Text.IslandItemsEdit")}</button>'
++                            f'<button class="btn btn-outline-primary"'
++                            f' style="{ROW_BUTTON_STYLE}">'
++                            f'{t("Gui.Text.IslandItemsEdit")}</button>'
+                         ).onclick(edit_callback),
+                         put_html(
+-                            f'<button class="btn btn-outline-warning btn-sm btn-block">'
++                            f'<button class="btn btn-outline-warning"'
++                            f' style="{ROW_BUTTON_STYLE}">'
+                             f'{t("Gui.Text.IslandItemsDelete")}</button>'
+                         ).onclick(delete_callback),
+                     ],
+                     size="1fr 1fr",
+-                ),
++                ).style(f"gap: .25rem; height: {ROW_HEIGHT}"),
+             ],
+-            size="minmax(10rem, 1fr) 4.5rem 9rem",
+-        ).style("padding: .15rem 0")
++            size=f"minmax(9rem, 15rem) 4.5rem 7.5rem",
++        ).style(f"align-items: center; padding: 0; margin: 0; height: {ROW_HEIGHT}")
+ 
+     def collect_rows():
+         return [make_row(item_id, amount) for item_id, amount in sorted_items(items)]
+@@ -617,23 +638,25 @@
+                         placeholder=t("Gui.Text.IslandItemsAmount"),
+                     ),
+                     put_html(
+-                        f'<button class="btn btn-primary btn-block">'
++                        f'<button class="btn btn-primary"'
++                        f' style="{ROW_BUTTON_STYLE} width: 100%">'
+                         f'{t("Gui.Text.IslandItemsAdd")}</button>'
+                     ).onclick(add_callback),
+                 ],
+                 size="minmax(8rem, 1fr) 8rem 6.5rem",
+-            ).style("max-width: 42rem; margin: .25rem 0 .375rem"),
++            ).style(f"max-width: 28rem; height: {ROW_HEIGHT}; margin: .25rem 0 .375rem"),
+             put_scope(
+                 list_scope, [put_column(initial_rows, size="auto")]
+             ).style(
+-                "max-width: 42rem; max-height: 22rem; overflow-y: auto;"
++                "max-width: 28rem; max-height: 22rem; overflow-y: auto;"
+                 " border: 1px solid rgba(128, 128, 128, .35);"
+-                " border-radius: .25rem; padding: .25rem .625rem"
++                " border-radius: .25rem; padding: .25rem .5rem"
+             ),
+             put_html(
+-                f'<button class="btn btn-outline-warning btn-sm">'
++                f'<button class="btn btn-outline-warning btn-sm"'
++                f' style="margin-top: .375rem">'
+                 f'{t("Gui.Text.IslandItemsClear")}</button>'
+-            ).onclick(clear_callback).style("margin-top: .375rem"),
++            ).onclick(clear_callback),
+         ],
+     )
+ 
+--- AzurLaneAutoScript/dev_tools/island_waitress_lock_check.py	1970-01-01 08:00:00.000000000 +0800
++++ AzurLaneAutoScript-dev/dev_tools/island_waitress_lock_check.py	1970-01-01 08:00:00.000000000 +0800
+@@ -0,0 +1,91 @@
++"""Offline checks for the waitress lock decision of IslandRestaurant.
++
++The lock now depends on three questions:
++  1. is the waitress really employed by another running restaurant,
++  2. do both restaurants still need a shift today,
++  3. does another full shift still fit before the daily reset.
++
++Run with: toolkit/python.exe dev_tools/island_waitress_lock_check.py
++"""
++import sys
++from datetime import datetime, timedelta
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++
++from module.island_handler import restaurant as restaurant_module
++from module.island_handler.restaurant import IslandRestaurant
++
++NOW = datetime(2026, 10, 23, 10, 0)
++NEXT_UPDATE = datetime(2026, 10, 24, 0, 0)
++
++# Prinz_Eugen is assigned to both 603 (Eatery) and 604 (Grill).
++SLOTS = {
++    601: ('none', 'none'),
++    602: ('none', 'none'),
++    603: ('Prinz_Eugen', 'none'),
++    604: ('Prinz_Eugen', 'none'),
++    901: ('none', 'none'),
++}
++
++restaurant_module.get_waitress_slots = lambda config, restaurant_id: SLOTS[restaurant_id]
++restaurant_module.get_server_next_update = lambda target: NEXT_UPDATE
++
++
++def make(states, finish_times):
++    obj = object.__new__(IslandRestaurant)
++    obj.working_restaurant_id = 604
++    obj.restaurant_states = states
++    obj.restaurant_finish_times = finish_times
++    obj.config = object()
++    return obj
++
++
++def check(name, actual, expected):
++    status = 'OK  ' if actual == expected else 'FAIL'
++    print(f'[{status}] {name}: {actual!r} (expected {expected!r})')
++    return actual == expected
++
++
++results = []
++
++# 1. She is on shift and the next shift still fits before 00:00 -> wait for her.
++obj = make({603: 'running'}, {603: NOW + timedelta(hours=4)})
++status, employer, finish = obj.locked_waitress_status('Prinz_Eugen')
++results.append(check('running shift, ends 14:00', (status, employer, finish), ('running', 603, NOW + timedelta(hours=4))))
++results.append(check('14:00 + 8h fits before 00:00 -> lock', obj.should_lock_waitress(finish), True))
++
++# 2. She is on shift, but a second shift would end after 00:00 -> replace her.
++obj = make({603: 'running'}, {603: NOW + timedelta(hours=8)})
++_, _, finish = obj.locked_waitress_status('Prinz_Eugen')
++results.append(check('18:00 + 8h overflows -> no lock', obj.should_lock_waitress(finish), False))
++
++# 3. Exactly at the boundary (16:00 + 8h == 00:00) still fits.
++obj = make({603: 'running'}, {603: NOW + timedelta(hours=6)})
++_, _, finish = obj.locked_waitress_status('Prinz_Eugen')
++results.append(check('16:00 + 8h == 00:00 -> lock', obj.should_lock_waitress(finish), True))
++
++# 4. Her shift already crosses 00:00 -> always wait, never open a late-night round.
++obj = make({603: 'running'}, {603: NEXT_UPDATE + timedelta(hours=1)})
++_, _, finish = obj.locked_waitress_status('Prinz_Eugen')
++results.append(check('shift ends tomorrow 01:00 -> lock', obj.should_lock_waitress(finish), True))
++
++# 5. The other restaurant is resting today -> she is free, pick her normally.
++obj = make({603: 'resting'}, {})
++results.append(check('other restaurant resting', obj.locked_waitress_status('Prinz_Eugen'), ('idle', None, None)))
++
++# 6. The other restaurant has not opened yet today -> she is free as well.
++obj = make({603: 'ready'}, {})
++results.append(check('other restaurant ready', obj.locked_waitress_status('Prinz_Eugen'), ('idle', None, None)))
++
++# 7. Unknown state (asset recognition failed) -> keep the old, safe behaviour.
++obj = make({}, {})
++results.append(check('unknown state', obj.locked_waitress_status('Prinz_Eugen'), ('unknown', None, None)))
++
++# 8. She is not assigned to any other restaurant -> nothing to lock.
++obj = make({603: 'running'}, {603: NOW + timedelta(hours=4)})
++results.append(check('not shared with 603', obj.locked_waitress_status('Belfast'), ('idle', None, None)))
++
++print()
++print(f'{sum(results)}/{len(results)} checks passed')
++sys.exit(0 if all(results) else 1)

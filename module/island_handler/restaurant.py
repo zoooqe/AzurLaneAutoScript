@@ -38,6 +38,9 @@ from module.ocr.ocr import Digit
 from module.statistics.item import Item, ItemGrid
 
 RESTAURANT_SWIPE_AREA = (583, 208, 1023, 400)
+# One restaurant shift lasts 8 hours in game, the same assumption ``IslandBusiness``
+# uses when it schedules the next round.
+RESTAURANT_SHIFT_LENGTH = timedelta(hours=8)
 ISLAND_RESTAURANT_ITEM_ORDER_PRICE = {
     DIC_ISLAND_ITEM[item_id]['name']['en'].replace(' ', '_'): {
         'id': item_id,
@@ -60,6 +63,31 @@ def restaurant_item_log_text(item, sell_amount=None):
 
 class WaitressOccupied(Exception):
     pass
+
+
+class WaitressLocked(Exception):
+    """A named waitress is still employed by another restaurant until `finish_time`.
+
+    Unlike WaitressOccupied, the end of her current shift is known, so the
+    restaurant can be delayed to that moment instead of replacing her.
+    """
+
+    def __init__(self, message, waitress=None, finish_time=None):
+        super().__init__(message)
+        self.waitress = waitress
+        self.finish_time = finish_time
+
+
+class MenuIncomplete(Exception):
+    """Part of the configured menu is not stocked enough to open a full round.
+
+    Raised instead of opening with a partial menu when WaitForFullMenu is on,
+    so the restaurant is delayed and retried once production catches up.
+    """
+
+    def __init__(self, message, missing=None):
+        super().__init__(message)
+        self.missing = missing or []
 
 
 class RestaurantItem(Item):
@@ -123,6 +151,9 @@ class RestaurantItemGrid(ItemGrid):
 
 class IslandRestaurant(IslandDock):
     working_restaurant_id = None
+    # Filled by IslandBusiness before dispatching: {restaurant_id: 'running'|'resting'|'ready'}
+    restaurant_states = {}
+    restaurant_finish_times = {}
 
     @cached_property
     def restaurant_capacity(self):
@@ -282,6 +313,30 @@ class IslandRestaurant(IslandDock):
             and has_sellable_capacity(item)
         ]
         quantity = self.restaurant_quantity[self.working_restaurant_id]
+        if self.wait_for_full_menu and menu:
+            ready_ids = {item.id for item in menu_items}
+            # Only the dishes that can actually take a shelf are required. A menu
+            # longer than the shelf count is a list of choices, not a promise to
+            # sell them all at once, so a dish beyond the shelf count must not
+            # hold the round back.
+            required = min(len(menu), quantity)
+            if len(ready_ids) < required:
+                # Opening with a short menu would silently sell unplanned items,
+                # so delay the round until production catches up.
+                stock_map = {item.id: item.amount for item in items}
+                missing = sorted(item_id for item_id in menu if item_id not in ready_ids)
+                restaurant = production_place_name_with_id(self.working_restaurant_id)
+                detail = ', '.join(
+                    f'{item_name_with_id(item_id)} '
+                    f'{stock_map.get(item_id, 0)}/'
+                    f'{capacity + protected_items.get(item_id, 0)}'
+                    for item_id in missing
+                )
+                raise MenuIncomplete(
+                    f'Restaurant {restaurant} waits for its full menu, '
+                    f'not enough: {detail}',
+                    missing=missing,
+                )
         plan = sorted(menu_items, key=total_revenue_estimate, reverse=True)[:quantity]
         remaining = quantity - len(plan)
         if remaining:
@@ -316,6 +371,11 @@ class IslandRestaurant(IslandDock):
             restaurant_item_log_text(item, sell_amount=capacity) for item in plan
         ) or '-'
         logger.info(f'Restaurant configured menu for {restaurant}: {menu_summary}')
+        if len(menu) > quantity:
+            logger.info(
+                f'Restaurant {restaurant} menu lists {len(menu)} dishes but the grade only '
+                f'unlocks {quantity} shelves, the extra dishes are not sold this round'
+            )
         logger.info(f'Restaurant sell plan for {restaurant}: {plan_summary}')
         return plan
 
@@ -354,6 +414,70 @@ class IslandRestaurant(IslandDock):
             )
         return sorted(lst - current_waitresses)
 
+    @property
+    def wait_for_full_menu(self):
+        """Open a restaurant only when every configured dish is stocked enough.
+
+        When off, a partially stocked menu is topped up with other sellable
+        items so the round still runs, which was the old behaviour.
+        """
+        return bool(self.config.cross_get(
+            "IslandBusiness.IslandRestaurant.WaitForFullMenu", True
+        ))
+
+    @property
+    def waitress_lock_enabled(self):
+        return bool(self.config.cross_get(
+            "IslandBusiness.IslandRestaurant.WaitressLock", True
+        ))
+
+    def locked_waitress_status(self, waitress):
+        """Where ``waitress`` is currently working, and whether she is idle.
+
+        A named waitress can be configured for several restaurants at once.  She
+        is only really "unavailable" while one of those restaurants is running,
+        so a restaurant that is resting (or has not opened yet today) must not
+        make her look occupied.
+
+        Returns:
+            (status, restaurant_id, finish_time)
+            status: 'running'  she is employed by ``restaurant_id``,
+                    'idle'     no configured restaurant is running, she is free,
+                    'unknown'  the state of a configured restaurant is unknown.
+        """
+        states = getattr(self, 'restaurant_states', None) or {}
+        finish_times = getattr(self, 'restaurant_finish_times', None) or {}
+        idle = True
+        for restaurant_id in RESTAURANT_IDS:
+            if restaurant_id == self.working_restaurant_id:
+                continue
+            if waitress not in get_selected_named_waitresses(
+                    get_waitress_slots(self.config, restaurant_id)):
+                continue
+            state = states.get(restaurant_id)
+            if state == 'running':
+                return 'running', restaurant_id, finish_times.get(restaurant_id)
+            if state not in ('resting', 'ready'):
+                idle = False
+        if idle:
+            return 'idle', None, None
+        return 'unknown', None, None
+
+    @staticmethod
+    def should_lock_waitress(finish_time):
+        """Decide whether this restaurant should wait for her current shift.
+
+        Waiting only pays off while both restaurants still want a shift today
+        and another full shift still fits before the daily reset.  A shift that
+        already runs past 00:00 is always waited out: opening the restaurant
+        right away would only burn a late-night shift, and she would be free
+        again in the new day anyway.
+        """
+        next_update = get_server_next_update("00:00")
+        if finish_time >= next_update:
+            return True
+        return finish_time + RESTAURANT_SHIFT_LENGTH <= next_update
+
     def restaurant_running(self):
         return self.appear(ISLAND_RESTAURANT_RUNNING, offset=self._restaurant_offset)
 
@@ -386,12 +510,51 @@ class IslandRestaurant(IslandDock):
         restaurant = production_place_name_with_id(self.working_restaurant_id)
         for waitress in named_waitresses:
             if waitress in unavailable_waitress_list:
-                logger.warning(
-                    f"Waitress {waitress} is already assigned to another restaurant, "
-                    f"skip it for restaurant {restaurant}"
-                )
-                unavailable_waitress_list.remove(waitress)
-                continue
+                status, employer_id, locked_until = self.locked_waitress_status(waitress)
+                if status == 'idle':
+                    # No configured restaurant is running her, so she is not
+                    # occupied at all; pick her normally instead of replacing her.
+                    logger.info(
+                        f"Waitress {waitress} is not employed by any running restaurant, "
+                        f"treat her as free for restaurant {restaurant}"
+                    )
+                    unavailable_waitress_list.remove(waitress)
+                elif not self.waitress_lock_enabled:
+                    logger.warning(
+                        f"Waitress {waitress} is already assigned to another restaurant, "
+                        f"skip it for restaurant {restaurant}"
+                    )
+                    unavailable_waitress_list.remove(waitress)
+                    continue
+                elif status == 'running' and locked_until is not None:
+                    employer = production_place_name_with_id(employer_id)
+                    if self.should_lock_waitress(locked_until):
+                        logger.info(
+                            f"Waitress {waitress} is locked by {employer} until "
+                            f"{locked_until}, delay restaurant {restaurant} for her "
+                            f"instead of replacing her"
+                        )
+                        self.ui_back(check_button=self.is_in_island_restaurant)
+                        raise WaitressLocked(
+                            f"Restaurant {restaurant} waits for waitress {waitress} "
+                            f"until {locked_until}",
+                            waitress=waitress,
+                            finish_time=locked_until,
+                        )
+                    logger.warning(
+                        f"Waitress {waitress} is employed by {employer} until "
+                        f"{locked_until}, too late to fit another shift before "
+                        f"00:00, replace her for restaurant {restaurant}"
+                    )
+                    unavailable_waitress_list.remove(waitress)
+                    continue
+                else:
+                    logger.warning(
+                        f"Waitress {waitress} is already assigned to another restaurant, "
+                        f"skip it for restaurant {restaurant}"
+                    )
+                    unavailable_waitress_list.remove(waitress)
+                    continue
             candidate = self.island_dock_find_character(waitress)
             if candidate is not None and candidate.status == 'free':
                 self.island_dock_select_one(candidate.button)

@@ -114,3 +114,12 @@ Text:
   Clear:
   EnterPassword:
   ChooseFile:
+  IslandItemsPick:
+  IslandItemsAmount:
+  IslandItemsAdd:
+  IslandItemsClear:
+  IslandItemsEmpty:
+  IslandItemsDelete:
+  IslandItemsEdit:
+  IslandItemsInvalidItem:
+  IslandItemsInvalidAmount:

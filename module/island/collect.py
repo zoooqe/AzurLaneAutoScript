@@ -11,6 +11,15 @@ ISLAND_COLLECT_WORKSLOT_GRID = ButtonGrid(
     origin=(832, 227), delta=(95, 0), button_shape=(74, 74), grid_shape=(3, 1)
 )
 
+# Adaptability grade read from the dock card by GradeScanner, best first.
+# Unknown grades (OCR miss) go last so a readable card always wins.
+GRADE_PRIORITY = {'S': 0, 'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5}
+GRADE_UNKNOWN = len(GRADE_PRIORITY)
+
+
+def grade_priority(character):
+    return GRADE_PRIORITY.get(character.grade, GRADE_UNKNOWN)
+
 
 class IslandCollect(IslandDock):
     def collect_location_unselected_buttons(self):
@@ -97,6 +106,15 @@ class IslandCollect(IslandDock):
                 logger.warning(f'No candidate found for workslot {workslot}, canceling collect')
                 self.island_dock_quit()
                 return False
+            # Collect output scales with adaptability, so spend the best grade first.
+            candidates.sort(key=grade_priority)
+            logger.info(
+                f'Collect candidates for workslot {workslot}: '
+                + ', '.join(
+                    f'{candidate.identity}({candidate.grade or "unknown"})'
+                    for candidate in candidates
+                )
+            )
             button = candidates[0].button
             self.island_dock_select_one(button)
             self.island_dock_select_confirm(check_button=[ISLAND_COLLECT_START, ISLAND_COLLECT_START_UNAVAILABLE])

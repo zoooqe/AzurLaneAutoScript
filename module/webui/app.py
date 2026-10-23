@@ -373,6 +373,9 @@ class AlasGUI(Frame):
             output_kwargs["help"] = arg_help
             # Invalid feedback
             output_kwargs["invalid_feedback"] = t("Gui.Text.InvalidFeedBack", value)
+            # Server language, used by widgets showing in-game item names
+            if output_kwargs["widget_type"] == "island_items":
+                output_kwargs["lang"] = server
 
             o = put_output(output_kwargs)
             if o is not None:

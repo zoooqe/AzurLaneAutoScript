@@ -6,12 +6,16 @@ from module.base.timer import Timer
 from module.base.utils import random_rectangle_vector_opted
 from module.exception import RequestHumanTakeover
 from module.island.assets import *
-from module.island.data import DIC_ISLAND_PRODUCTION_PLACE, DIC_ISLAND_SLOT
+from module.island.data import DIC_ISLAND_PRODUCTION_PLACE, DIC_ISLAND_RECIPE, DIC_ISLAND_SLOT
 from module.island.utils import item_name_with_id, production_place_name_with_id
 from module.island_handler.dock import IslandDock
 from module.island_handler.dock_scanner import CharacterScanner
 from module.island_handler.exchange import FISH_MEAT_SOURCES
-from module.island_handler.recipe import IslandProductionRestart, IslandRecipe
+from module.island_handler.recipe import (
+    IslandProductionRestart,
+    IslandRecipe,
+    get_recipe_product_id,
+)
 from module.logger import logger
 from module.map_detection.utils import Points
 from module.ui.page import page_island, page_island_manage
@@ -216,6 +220,8 @@ class IslandProduction(IslandRecipe, IslandDock):
                         self.claimed_slots.add(slot_id)
                     if slot_id in self.slot_finish_time:
                         del self.slot_finish_time[slot_id]
+                    # Finished slots are no longer in flight, forget their plan.
+                    self.slot_plan.pop(slot_id, None)
 
     def claim_all_rewards(self):
         logger.hr("Claim Production Rewards", level=2)
@@ -225,6 +231,73 @@ class IslandProduction(IslandRecipe, IslandDock):
             self.claim_reward_in_page()
             if not self.next_page():
                 break
+
+    def record_slot_plan(self, slot_id):
+        """Remember what a slot was told to produce, so it counts as stock later."""
+        recipe = getattr(self, 'last_started_recipe', None)
+        if not recipe:
+            return
+        recipe_id, batch_count = recipe
+        if not isinstance(batch_count, (int, float)) or batch_count in (float('inf'), float('-inf')):
+            logger.warning(
+                f'Unknown batch count {batch_count} for slot {slot_id}, skipping slot plan'
+            )
+            return
+        product_id = get_recipe_product_id(recipe_id)
+        amount = DIC_ISLAND_RECIPE[recipe_id]['commission_product'][product_id] * batch_count
+        if float(amount).is_integer():
+            amount = int(amount)
+        if amount <= 0:
+            return
+        self.slot_plan[slot_id] = {product_id: amount}
+        logger.info(
+            f'Slot {slot_id} is producing {amount} {item_name_with_id(product_id)}, '
+            f'committed stock of this item: {self.pending_output.get(product_id, 0)}'
+        )
+
+    def restore_slot_plan(self):
+        """Seed committed stock from slots that are still producing.
+
+        Slots keep running between task runs, so their products are missing from
+        the scanned warehouse stock. Restoring the persisted plan keeps buffer
+        surplus and idle accumulating from dispatching the same items again.
+        """
+        raw = self.config.cross_get(
+            "IslandProduction.Storage.Storage.SlotItems", default={}
+        ) or {}
+        self.slot_plan = {}
+        try:
+            for raw_slot_id, raw_items in raw.items():
+                slot_id = int(raw_slot_id)
+                if slot_id in self.claimed_slots:
+                    continue
+                plan = {}
+                for raw_item_id, raw_amount in (raw_items or {}).items():
+                    item_id = int(raw_item_id)
+                    amount = float(raw_amount)
+                    if amount <= 0:
+                        continue
+                    plan[item_id] = amount
+                    self.pending_output[item_id] = (
+                        self.pending_output.get(item_id, 0) + amount
+                    )
+                if plan:
+                    self.slot_plan[slot_id] = plan
+        except (AttributeError, TypeError, ValueError) as e:
+            logger.warning(f'Ignoring malformed island slot plan in config: {e}')
+            self.slot_plan = {}
+            self._pending_output = {}
+            return
+        if self.slot_plan:
+            logger.info(
+                'Production slots still running: ' + ', '.join(
+                    f'{slot_id}: ' + '/'.join(
+                        f'{amount} {item_name_with_id(item_id)}'
+                        for item_id, amount in plan.items()
+                    )
+                    for slot_id, plan in sorted(self.slot_plan.items())
+                )
+            )
 
     def dispatch_slot(self, slot_id, slot_button, worker='manjuu'):
         if slot_id in DIC_ISLAND_PRODUCTION_PLACE[102]['slot']:
@@ -256,6 +329,7 @@ class IslandProduction(IslandRecipe, IslandDock):
         if target_time is not None:
             target_time = target_time.replace(microsecond=0)
             self.slot_finish_time[slot_id] = target_time
+            self.record_slot_plan(slot_id)
             self.ensure_island_production_page()
         else:
             logger.warning(f'Failed to start production for {production_slot_name_with_id(slot_id)}')
@@ -353,6 +427,9 @@ class IslandProduction(IslandRecipe, IslandDock):
         slot_finish_time = self.config.cross_get("IslandProduction.Storage.Storage.SlotFinishTime", default={})
         self.slot_finish_time = {int(k): datetime.fromisoformat(v) for k, v in slot_finish_time.items()}
         self.fish_meat_stock = {}
+        # Committed stock is rebuilt from the persisted per-slot plan below.
+        self._pending_output = {}
+        self.slot_plan = {}
         self.claim_all_rewards()
         yaml_text = self.config.cross_get("IslandProduction.IslandProduction.DailyBufferItems", "")
         if not yaml_text or yaml_text == "{}":
@@ -360,12 +437,17 @@ class IslandProduction(IslandRecipe, IslandDock):
             raise RequestHumanTakeover('No daily buffer items found in config, please run Island Production Planner first')
         if self.claimed_slots.intersection(DIC_ISLAND_PRODUCTION_PLACE[201]['slot']):
             self.exchange_surplus_fish()
+        self.restore_slot_plan()
         self.dispatch_all()
         next_run_time = list(self.slot_finish_time.values())
         with self.config.multi_set():
             sorted_items = sorted(self.slot_finish_time.items(), key=lambda kv: (kv[1], kv[0]))
             slot_finish_time = {k: v.isoformat(sep=' ') for k, v in sorted_items}
             self.config.cross_set("IslandProduction.Storage.Storage.SlotFinishTime", slot_finish_time)
+            self.config.cross_set("IslandProduction.Storage.Storage.SlotItems", {
+                str(slot_id): {str(item_id): amount for item_id, amount in plan.items()}
+                for slot_id, plan in sorted(self.slot_plan.items())
+            })
             if next_run_time:
                 self.config.task_delay(target=next_run_time)
             else:

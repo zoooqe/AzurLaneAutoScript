@@ -266,6 +266,10 @@
       "name": "Island Request",
       "help": ""
     },
+    "IslandTransport": {
+      "name": "Island Transport",
+      "help": "Claim finished transports, then submit the commissions worth the most to the production plan, swapping in commissions from the list when they are better.\nCommissions are valued with the production plan, run Tools - Island Production Planner first.\nOnly JP and CN servers are supported for now."
+    },
     "IslandFreebie": {
       "name": "Daily Supplies",
       "help": ""
@@ -2700,6 +2704,14 @@
       "name": "Restaurant Management",
       "help": ""
     },
+    "WaitressLock": {
+      "name": "Lock Waitresses",
+      "help": "Applies when the same waitress is assigned to several restaurants: if she is working in another restaurant and both restaurants still need a shift today and another shift still fits after she finishes, wait for her shift to end before opening this one; if it does not fit, replace her. If her other restaurant is resting (not doing business today), pick her as usual. A shift that crosses 00:00 is always waited out instead of opening a late-night round."
+    },
+    "WaitForFullMenu": {
+      "name": "Wait for Full Menu",
+      "help": "Check the configured menu before opening: every dish that can take a shelf needs enough stock for a full round, otherwise skip this round and retry in 1 hour instead of substituting other items. Dishes beyond the shelf count are not sold this round, so their shortage does not delay the round. When off, missing dishes are topped up with other sellable items (old behaviour)."
+    },
     "KoiGrade": {
       "name": "Golden Koi Restaurant Grade",
       "help": "",
@@ -3097,7 +3109,16 @@
       "InvalidFeedBack": "Invalid format. Example: {0}",
       "Clear": "Clear",
       "EnterPassword": "Enter password",
-      "ChooseFile": "Choose file"
+      "ChooseFile": "Choose file",
+      "IslandItemsPick": "Select item",
+      "IslandItemsAmount": "Amount, e.g. 300 or 12.5",
+      "IslandItemsAdd": "Add / Update",
+      "IslandItemsClear": "Clear all",
+      "IslandItemsEmpty": "No item configured",
+      "IslandItemsDelete": "Delete",
+      "IslandItemsEdit": "Edit",
+      "IslandItemsInvalidItem": "Select an item first",
+      "IslandItemsInvalidAmount": "Invalid amount, enter a number greater than 0"
     }
   }
 }

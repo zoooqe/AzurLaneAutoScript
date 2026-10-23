@@ -767,19 +767,19 @@ OpsiHazard1Leveling:
 
 IslandProduction:
   HardFloorItems:
-    type: textarea
+    type: island_items
     value: |-
       {}
   DailyBufferItems:
-    type: textarea
+    type: island_items
     value: |-
       {}
   ManualBufferItems:
-    type: textarea
+    type: island_items
     value: |-
       {}
   IdleAccumulatingItems:
-    type: textarea
+    type: island_items
     value: |-
       {}
   SkipBufferSurplus: true
@@ -788,6 +788,8 @@ IslandOrder:
 IslandFreebie:
   Share: true
 IslandRestaurant:
+  WaitressLock: true
+  WaitForFullMenu: true
   KoiGrade:
     value: bronze
     option: [ bronze, silver, gold, diamond ]

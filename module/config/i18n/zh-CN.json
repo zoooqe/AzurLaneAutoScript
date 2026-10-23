@@ -266,6 +266,10 @@
       "name": "岛屿订单",
       "help": ""
     },
+    "IslandTransport": {
+      "name": "货运委托",
+      "help": "领取已完成的货运奖励，然后按生产规划提交收益最高的委托，必要时替换为委托列表中更好的委托。\n委托按生产规划估值，需要先运行工具-岛屿生产规划器。\n目前仅支持日服和国服。"
+    },
     "IslandFreebie": {
       "name": "每日补给",
       "help": ""
@@ -2700,6 +2704,14 @@
       "name": "餐厅管理",
       "help": ""
     },
+    "WaitressLock": {
+      "name": "锁定店员",
+      "help": "同一个店员被多家餐厅同时安排时生效：若她正在另一家餐厅经营，且今天两家餐厅都还要营业、她下班后仍来得及再排一场，就等她结束再来本餐厅；时间来不及则直接换人。若她所在的另一家餐厅正在休息（今天不营业），则照常选择她。她这次经营如果会跨过 00:00，则一律等她，不抢开深夜的一场。"
+    },
+    "WaitForFullMenu": {
+      "name": "等待菜品备齐",
+      "help": "开店前检查配置的菜品：能上架的菜都达到一次营业所需的数量才开门；只要有一种没备够，就跳过本轮、1 小时后再试，不会拿别的菜顶替。菜单里的菜比栏位多时，多出来的本轮不上架，不会因为它没备够而等待。关闭后，缺的菜会用其它可售物品补位照常营业（旧行为）。"
+    },
     "KoiGrade": {
       "name": "有鱼餐馆等级",
       "help": "",
@@ -3097,7 +3109,16 @@
       "InvalidFeedBack": "格式错误。 示例：{0}",
       "Clear": "清除",
       "EnterPassword": "输入密码",
-      "ChooseFile": "选择文件"
+      "ChooseFile": "选择文件",
+      "IslandItemsPick": "选择物品",
+      "IslandItemsAmount": "数量，如 300 或 12.5",
+      "IslandItemsAdd": "添加 / 更新",
+      "IslandItemsClear": "清空全部",
+      "IslandItemsEmpty": "当前没有配置物品",
+      "IslandItemsDelete": "删除",
+      "IslandItemsEdit": "编辑",
+      "IslandItemsInvalidItem": "请先选择物品",
+      "IslandItemsInvalidAmount": "数量无效，请输入大于 0 的数字"
     }
   }
 }

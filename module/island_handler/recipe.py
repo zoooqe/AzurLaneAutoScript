@@ -383,6 +383,18 @@ class IslandRecipe(IslandExchange, IslandShop):
     def all_recipe_stocks(self):
         return self.scan_all_recipe_stocks()
 
+    @property
+    def pending_output(self) -> dict:
+        """{product_id: amount} committed to production slots but not harvested yet.
+
+        Scanned recipe stocks only contain the warehouse, so without this the
+        surplus and idle-accumulating checks would keep dispatching items that
+        are already being produced.
+        """
+        if getattr(self, '_pending_output', None) is None:
+            self._pending_output = {}
+        return self._pending_output
+
     @cached_property
     def recipe_id_sequence(self):
         return self.get_recipe_id_sequence_to_run()
@@ -467,10 +479,14 @@ class IslandRecipe(IslandExchange, IslandShop):
         fish_buffer_rates = self.get_fish_buffer_rates(
             hard_floor_items_dict, reserve_items_dict, daily_buffer_items_dict, task_target_items_dict)
         self.recipe_info_by_id = {}
-        for recipe_id, stock in stocks_dict.items():
+        pending_output = self.pending_output
+        for recipe_id, scanned_stock in stocks_dict.items():
             recipe_product = DIC_ISLAND_RECIPE[recipe_id]['commission_product']
             product_id = get_recipe_product_id(recipe_id)
             batch_size = recipe_product[product_id]
+            # In-flight production counts as stock: it is not in the warehouse
+            # yet, but it must not be produced a second time.
+            stock = scanned_stock + pending_output.get(product_id, 0)
             daily_buffer_width = daily_buffer_items_dict.get(product_id, 0)
             if product_id in fish_buffer_rates:
                 daily_buffer_width = ceil_with_epsilon(daily_buffer_width * fish_buffer_rates[product_id])
@@ -912,35 +928,53 @@ class IslandRecipe(IslandExchange, IslandShop):
                 f'Recipe {format_recipe_with_product(recipe_id)} started with amount '
                 f'{"max" if real_count == float("inf") else real_count}, remain time: {remain_time}'
             )
+            # Read by IslandProduction.dispatch_slot to remember what each slot
+            # is producing while it runs.
+            self.last_started_recipe = (recipe_id, real_count)
             return remain_time, real_count
         else:
             logger.warning('Failed to get recipe remain time, recipe may not have started successfully')
             return None
 
+    def _refresh_recipe_info_stock(self):
+        """Recompute info.stock as scanned stock plus committed production."""
+        pending_output = self.pending_output
+        self.recipe_info_by_id = {
+            recipe_id: info._replace(
+                stock=self.all_recipe_stocks.get(recipe_id, info.stock)
+                + pending_output.get(get_recipe_product_id(recipe_id), 0)
+            )
+            for recipe_id, info in self.recipe_info_by_id.items()
+        }
+
     def update_recipe_id_sequence_and_stock(self, recipe_id, batch_count):
         recipe_cost = DIC_ISLAND_RECIPE[recipe_id]['commission_cost']
         consumed_items = {item_id: amount * batch_count for item_id, amount in recipe_cost.items()}
-        for old_recipe_id, info in self.recipe_info_by_id.items():
-            product_id = get_recipe_product_id(old_recipe_id)
-            if old_recipe_id == recipe_id:
-                new_stock = info.stock + info.batch_size * batch_count
-                logger.info(
-                    f'Updated recipe {format_recipe_with_product(recipe_id)} stock '
-                    f'from {info.stock} to {new_stock} '
-                    f'after running recipe for {batch_count} batch(es)'
-                )
-            elif product_id in consumed_items:
-                new_stock = info.stock - consumed_items[product_id]
-                logger.info(
-                    f'Updated recipe {format_recipe_with_product(old_recipe_id)} stock '
-                    f'from {info.stock} to {new_stock} after consuming '
-                    f'{consumed_items[product_id]} {item_name_with_id(product_id)} for '
-                    f'recipe {format_recipe_with_product(recipe_id)}'
-                )
-            else:
+        product_id = get_recipe_product_id(recipe_id)
+        produced = DIC_ISLAND_RECIPE[recipe_id]['commission_product'][product_id] * batch_count
+        if float(produced).is_integer():
+            produced = int(produced)
+        self.pending_output[product_id] = self.pending_output.get(product_id, 0) + produced
+        logger.info(
+            f'Committed {produced} {item_name_with_id(product_id)} in production, '
+            f'total committed stock: {self.pending_output[product_id]}'
+        )
+        # Ingredients are consumed right away when production starts, so the
+        # scanned stock baseline is reduced for the rebuilt sequence.
+        for old_recipe_id in list(self.recipe_info_by_id):
+            consumed_product = get_recipe_product_id(old_recipe_id)
+            if consumed_product not in consumed_items:
                 continue
-            self.recipe_info_by_id[old_recipe_id] = info._replace(stock=new_stock)
+            old_stock = self.all_recipe_stocks.get(old_recipe_id, 0)
+            new_stock = old_stock - consumed_items[consumed_product]
+            logger.info(
+                f'Updated recipe {format_recipe_with_product(old_recipe_id)} stock '
+                f'from {old_stock} to {new_stock} after consuming '
+                f'{consumed_items[consumed_product]} {item_name_with_id(consumed_product)} for '
+                f'recipe {format_recipe_with_product(recipe_id)}'
+            )
             self.all_recipe_stocks[old_recipe_id] = new_stock
+        self._refresh_recipe_info_stock()
         self.recipe_id_sequence = self._build_recipe_id_sequence_to_run()
 
     def run(self, slot_id=None):
@@ -949,6 +983,7 @@ class IslandRecipe(IslandExchange, IslandShop):
             target_time (datetime): timestamp of when the recipe will finish, or None if failed to run any recipe
         """
         self.working_slot_id = slot_id
+        self.last_started_recipe = None
         del_cached_property(self, 'recipe_grid')
         del_cached_property(self, 'recipe_ids')
         while self.recipe_id_sequence:

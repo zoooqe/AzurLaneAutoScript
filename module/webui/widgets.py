@@ -2,15 +2,17 @@ import copy
 import json
 import random
 import string
+from html import escape
 from typing import Any, Callable, Dict, Generator, List, Optional, TYPE_CHECKING, Union
 
 from pywebio.exceptions import SessionException
 from pywebio.io_ctrl import Output
 from pywebio.output import *
+from pywebio.pin import pin
 from pywebio.session import eval_js, local, run_js
 from rich.console import ConsoleRenderable
 
-from module.logger import HTMLConsole, Highlighter, WEB_THEME
+from module.logger import HTMLConsole, Highlighter, WEB_THEME, logger
 from module.webui.lang import t
 from module.webui.pin import put_checkbox, put_input, put_select, put_textarea
 from module.webui.process_manager import ProcessManager
@@ -490,6 +492,175 @@ def put_arg_storage(kwargs: T_Output_Kwargs) -> Optional[Output]:
     )
 
 
+def put_arg_island_items(kwargs: T_Output_Kwargs) -> Output:
+    """Item picker for island item mappings.
+
+    The config still stores a YAML text like `小麦 (2000): 300`, so island tasks
+    and the production planner are untouched, but the user picks items from a
+    dropdown instead of typing key-value pairs by hand.
+    """
+    from module.island.item_editor import (
+        format_amount,
+        is_valid_item_id,
+        item_label,
+        item_options,
+        items_from_text,
+        items_to_text,
+        parse_amount,
+        set_item,
+        sorted_items,
+    )
+
+    name: str = kwargs["name"]
+    lang: str = kwargs.get("lang", "cn")
+    _: str = kwargs.pop("invalid_feedback", None)
+    # {item_id: amount}, mutated in place by the callbacks below
+    items = items_from_text(kwargs.get("value"))
+
+    item_pin = f"{name}_Item"
+    amount_pin = f"{name}_Amount"
+    list_scope = f"island_items_list-{name}"
+
+    ROW_HEIGHT = "1.7rem"
+    ROW_BUTTON_STYLE = (
+        f"height: {ROW_HEIGHT}; min-height: {ROW_HEIGHT}; padding: 0 .4rem;"
+        " margin: 0; display: flex; align-items: center;"
+        " justify-content: center; font-size: .8125rem; line-height: 1;"
+    )
+
+    def save():
+        alasgui: "AlasGUI" = local.gui
+        alasgui.modified_config_queue.put(
+            {"name": ".".join(name.split("_")), "value": items_to_text(items)}
+        )
+
+    def make_row(item_id, amount):
+        def edit_callback(*_):
+            pin[item_pin] = str(item_id)
+            pin[amount_pin] = format_amount(amount)
+
+        def delete_callback(*_):
+            items.pop(int(item_id), None)
+            save()
+            render_rows()
+
+        # A fixed button height keeps the edit and delete buttons the same
+        # size, and zero vertical padding keeps rows compact: put_text() renders
+        # a <p> whose default bottom margin was adding the extra row spacing.
+        label = escape(item_label(item_id, lang))
+        return put_row(
+            [
+                put_html(
+                    f'<div class="island-item-name" title="{label}"'
+                    f' style="overflow: hidden; text-overflow: ellipsis;'
+                    f' white-space: nowrap; line-height: {ROW_HEIGHT}">{label}</div>'
+                ),
+                put_html(
+                    f'<div class="island-item-amount"'
+                    f' style="text-align: right; white-space: nowrap;'
+                    f' padding-right: .5rem; font-variant-numeric: tabular-nums;'
+                    f' line-height: {ROW_HEIGHT}">{format_amount(amount)}</div>'
+                ),
+                put_row(
+                    [
+                        put_html(
+                            f'<button class="btn btn-outline-primary"'
+                            f' style="{ROW_BUTTON_STYLE}">'
+                            f'{t("Gui.Text.IslandItemsEdit")}</button>'
+                        ).onclick(edit_callback),
+                        put_html(
+                            f'<button class="btn btn-outline-warning"'
+                            f' style="{ROW_BUTTON_STYLE}">'
+                            f'{t("Gui.Text.IslandItemsDelete")}</button>'
+                        ).onclick(delete_callback),
+                    ],
+                    size="1fr 1fr",
+                ).style(f"gap: .25rem; height: {ROW_HEIGHT}"),
+            ],
+            size=f"minmax(9rem, 15rem) 4.5rem 7.5rem",
+        ).style(f"align-items: center; padding: 0; margin: 0; height: {ROW_HEIGHT}")
+
+    def collect_rows():
+        return [make_row(item_id, amount) for item_id, amount in sorted_items(items)]
+
+    def render_rows():
+        rows = collect_rows()
+        with use_scope(list_scope, clear=True):
+            if rows:
+                # size='auto': never let the grid squeeze rows with `1fr`
+                put_column(rows, size="auto")
+            else:
+                put_text(t("Gui.Text.IslandItemsEmpty")).style("--arg-help--")
+
+    def add_callback(*_):
+        item_id = pin[item_pin]
+        if not item_id or not is_valid_item_id(item_id):
+            toast(t("Gui.Text.IslandItemsInvalidItem"), duration=2, color="warn")
+            return
+        amount = parse_amount(pin[amount_pin])
+        if amount is None or amount <= 0:
+            toast(t("Gui.Text.IslandItemsInvalidAmount"), duration=2, color="warn")
+            return
+        set_item(items, item_id, amount)
+        save()
+        render_rows()
+        pin[amount_pin] = ""
+
+    def clear_callback(*_):
+        items.clear()
+        save()
+        render_rows()
+
+    options = [{"label": t("Gui.Text.IslandItemsPick"), "value": ""}]
+    options += [
+        {"label": label, "value": value} for value, label in item_options(lang)
+    ]
+
+    initial_rows = collect_rows()
+    if not initial_rows:
+        initial_rows = [
+            put_text(t("Gui.Text.IslandItemsEmpty")).style("--arg-help--")
+        ]
+
+    return put_scope(
+        # Do NOT prefix with `arg_container-`: assets/gui/css/alas-pc.css turns
+        # those scopes into a 2-column grid (`1fr 13rem`), which squeezes this
+        # widget into 13rem and wraps item names one character per line.
+        f"island_items-{name}",
+        [
+            get_title_help(kwargs),
+            put_row(
+                [
+                    put_select(name=item_pin, options=options, value=""),
+                    put_input(
+                        name=amount_pin,
+                        type="text",
+                        placeholder=t("Gui.Text.IslandItemsAmount"),
+                    ),
+                    put_html(
+                        f'<button class="btn btn-primary"'
+                        f' style="{ROW_BUTTON_STYLE} width: 100%">'
+                        f'{t("Gui.Text.IslandItemsAdd")}</button>'
+                    ).onclick(add_callback),
+                ],
+                size="minmax(8rem, 1fr) 8rem 6.5rem",
+            ).style(f"max-width: 28rem; height: {ROW_HEIGHT}; margin: .25rem 0 .375rem"),
+            put_scope(
+                list_scope, [put_column(initial_rows, size="auto")]
+            ).style(
+                "max-width: 28rem; max-height: 22rem; overflow-y: auto;"
+                " border: 1px solid rgba(128, 128, 128, .35);"
+                " border-radius: .25rem; padding: .25rem .5rem"
+            ),
+            put_html(
+                f'<button class="btn btn-outline-warning btn-sm"'
+                f' style="margin-top: .375rem">'
+                f'{t("Gui.Text.IslandItemsClear")}</button>'
+            ).onclick(clear_callback),
+        ],
+    )
+
+
 _widget_type_to_func: Dict[str, Callable] = {
     "input": put_arg_input,
     "lock": put_arg_state,
@@ -500,11 +671,20 @@ _widget_type_to_func: Dict[str, Callable] = {
     "storage": put_arg_storage,
     "state": put_arg_state,
     "stored": put_arg_stored,
+    "island_items": put_arg_island_items,
 }
 
 
 def put_output(output_kwargs: T_Output_Kwargs) -> Optional[Output]:
-    return _widget_type_to_func[output_kwargs["widget_type"]](output_kwargs)
+    widget_type = output_kwargs.get("widget_type")
+    func = _widget_type_to_func.get(widget_type)
+    if func is None:
+        # Fallback instead of raising KeyError: a config generated by a newer
+        # version must not break page rendering of the whole task group.
+        logger.warning(f"Unknown widget type: {widget_type}, fallback to textarea")
+        func = put_arg_textarea
+    return func(output_kwargs)
+
 
 
 def get_loading_style(shape: str, fill: bool) -> str:
