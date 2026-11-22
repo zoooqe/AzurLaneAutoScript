@@ -3638,12 +3638,14 @@
           "war_archives_20230223_cn",
           "war_archives_20230525_cn",
           "war_archives_20230803_cn",
+          "war_archives_20230817_cn",
           "war_archives_20231026_cn",
           "war_archives_20240725_cn",
           "war_archives_20241024_cn",
           "war_archives_20251023_cn"
         ],
         "option_cn": [
+          "war_archives_20230817_cn",
           "war_archives_20251023_cn",
           "war_archives_20241024_cn",
           "war_archives_20240725_cn",
@@ -3696,6 +3698,7 @@
           "war_archives_20181020_en"
         ],
         "option_en": [
+          "war_archives_20230817_cn",
           "war_archives_20251023_cn",
           "war_archives_20241024_cn",
           "war_archives_20240725_cn",
@@ -3748,6 +3751,7 @@
           "war_archives_20181020_en"
         ],
         "option_jp": [
+          "war_archives_20230817_cn",
           "war_archives_20251023_cn",
           "war_archives_20241024_cn",
           "war_archives_20240725_cn",
@@ -3800,6 +3804,7 @@
           "war_archives_20181020_en"
         ],
         "option_tw": [
+          "war_archives_20230817_cn",
           "war_archives_20251023_cn",
           "war_archives_20241024_cn",
           "war_archives_20240725_cn",
@@ -9406,6 +9411,40 @@
       }
     }
   },
+  "IslandGeneral": {
+    "IslandGeneral": {
+      "Season": {
+        "type": "select",
+        "value": "season_20261105_cn",
+        "option": [
+          "season_20261105_cn"
+        ],
+        "option_cn": [
+          "season_20261105_cn"
+        ],
+        "option_en": [
+          "season_20261105_cn"
+        ],
+        "option_jp": [
+          "season_20261105_cn"
+        ],
+        "option_tw": [
+          "season_20261105_cn"
+        ],
+        "option_bold": [
+          "season_20261105_cn"
+        ]
+      }
+    },
+    "Storage": {
+      "Storage": {
+        "type": "storage",
+        "value": {},
+        "valuetype": "ignore",
+        "display": "disabled"
+      }
+    }
+  },
   "IslandProduction": {
     "Scheduler": {
       "Enable": {
@@ -9456,7 +9495,7 @@
         "value": "{}"
       },
       "IdleAccumulatingItems": {
-        "type": "island_items",
+        "type": "island_idle_items",
         "value": "{}"
       },
       "SkipBufferSurplus": {
@@ -9785,10 +9824,10 @@
       },
       "KoiWaitress1": {
         "type": "select",
-        "value": "any",
+        "value": "business_grade",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "Chao_Ho",
           "Chang_Feng"
         ]
@@ -9798,13 +9837,13 @@
         "value": "none",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "Chao_Ho",
           "Chang_Feng"
         ]
       },
       "KoiMenu": {
-        "type": "textarea",
+        "type": "island_menu",
         "value": "{}"
       },
       "BearGrade": {
@@ -9819,10 +9858,10 @@
       },
       "BearWaitress1": {
         "type": "select",
-        "value": "any",
+        "value": "business_grade",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "Cheshire",
           "Chang_Feng"
         ]
@@ -9832,13 +9871,13 @@
         "value": "none",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "Cheshire",
           "Chang_Feng"
         ]
       },
       "BearMenu": {
-        "type": "textarea",
+        "type": "island_menu",
         "value": "{}"
       },
       "EateryGrade": {
@@ -9853,10 +9892,10 @@
       },
       "EateryWaitress1": {
         "type": "select",
-        "value": "any",
+        "value": "business_grade",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "Helena",
           "Prinz_Eugen",
           "Chang_Feng"
@@ -9867,14 +9906,14 @@
         "value": "none",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "Helena",
           "Prinz_Eugen",
           "Chang_Feng"
         ]
       },
       "EateryMenu": {
-        "type": "textarea",
+        "type": "island_menu",
         "value": "{}"
       },
       "GrillGrade": {
@@ -9889,10 +9928,10 @@
       },
       "GrillWaitress1": {
         "type": "select",
-        "value": "any",
+        "value": "business_grade",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "August_von_Parseval",
           "Prinz_Eugen",
           "Chang_Feng"
@@ -9903,14 +9942,14 @@
         "value": "none",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "August_von_Parseval",
           "Prinz_Eugen",
           "Chang_Feng"
         ]
       },
       "GrillMenu": {
-        "type": "textarea",
+        "type": "island_menu",
         "value": "{}"
       },
       "CafeGrade": {
@@ -9925,10 +9964,10 @@
       },
       "CafeWaitress1": {
         "type": "select",
-        "value": "any",
+        "value": "business_grade",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "Cheshire",
           "Belfast",
           "Chang_Feng"
@@ -9939,14 +9978,14 @@
         "value": "none",
         "option": [
           "none",
-          "any",
+          "business_grade",
           "Cheshire",
           "Belfast",
           "Chang_Feng"
         ]
       },
       "CafeMenu": {
-        "type": "textarea",
+        "type": "island_menu",
         "value": "{}"
       }
     },

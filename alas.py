@@ -550,6 +550,40 @@ class AzurLaneAutoScript:
         AzurLaneConfig.is_hoarding_task = False
         return task.command
 
+    def reschedule_if_idle(self, task, next_run_before):
+        """Update the next run of a task that ended without scheduling itself.
+
+        A task can finish without ever calling task_delay: it was preempted by a
+        task that came due, the game died and a Restart was called, or the script
+        ended. NextRun then keeps the value it had, which may be days old, so the
+        scheduler treats the task as overdue for days and the config page shows
+        that old time. The task is really just due now.
+
+        Args:
+            task (str): Task command that has just ended.
+            next_run_before: Its NextRun when the run started.
+
+        Returns:
+            bool: If the task was rescheduled.
+        """
+        if not self.config.is_task_enabled(task):
+            return False
+        # Campaign tasks run on a deepcopy of the config, see
+        # module/campaign/run.py: `copy.deepcopy(self.config).merge(...)`.
+        # Their task_delay() writes the file but never this instance's data,
+        # so reading self.config.data here would see the stale NextRun and
+        # mistake a delayed task for an idle one. Reload from the file first.
+        self.config.load()
+        next_run_now = deep_get(
+            self.config.data, keys=f'{task}.Scheduler.NextRun', default=None
+        )
+        if next_run_now != next_run_before:
+            # The task scheduled its own next run, leave it alone.
+            return False
+        logger.info(f'Task `{task}` ended without scheduling itself, it is due now')
+        self.config.task_delay(minute=0, task=task)
+        return True
+
     def loop(self):
         logger.set_file_logger(self.config_name)
         logger.info(f'Start scheduler loop: {self.config_name}')
@@ -588,9 +622,12 @@ class AzurLaneAutoScript:
             self.device.stuck_record_clear()
             self.device.click_record_clear()
             logger.hr(task, level=0)
+            next_run_key = f'{task}.Scheduler.NextRun'
+            next_run_before = deep_get(self.config.data, keys=next_run_key, default=None)
             success = self.run(inflection.underscore(task))
             logger.info(f'Scheduler: End task `{task}`')
             self.is_first_task = False
+            self.reschedule_if_idle(task, next_run_before)
 
             # Check failures
             failed = deep_get(self.failure_record, keys=task, default=0)

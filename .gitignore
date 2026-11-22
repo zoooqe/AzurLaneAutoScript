@@ -22,6 +22,8 @@ test.py
 test/
 
 # Local tooling leftovers
+config/*.bak*
+config/island/
 .sync_backup/
 .workbuddy/
 assets/island/transport/new_templates/

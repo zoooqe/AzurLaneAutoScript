@@ -98,3 +98,38 @@ def test_hard_floor_met_keeps_normal_order():
     sequence = recipe._build_recipe_id_sequence_to_run()
 
     assert [recipe_id for recipe_id, _info, _mode in sequence] == [201006, 201002]
+
+
+def test_priority_ladder_runs_menu_then_surplus_then_season_then_idle():
+    # 201002 makes 鲶鱼 for a menu, 201006 makes 小龙虾 from shop fry, 701005
+    # makes 香囊 which only the development season wants, 701010 铁钉 is idle only.
+    menu_info = RecipeInfo(0, 20, 20, 8, [], 0)
+    surplus_info = RecipeInfo(100, 100, 100, 8, [], 0)
+    season_info = RecipeInfo(0, 20, 20, 8, [], 0)
+    idle_info = RecipeInfo(100, 100, 100, 8, [], 1)
+    recipe = make_recipe(201002, menu_info, skip_buffer_surplus=False)
+    recipe.recipe_info_by_id.update({
+        201006: surplus_info,
+        701005: season_info,
+        701010: idle_info,
+    })
+    recipe.low_priority_products = frozenset({3039})
+
+    sequence = recipe._build_recipe_id_sequence_to_run()
+
+    assert [recipe_id for recipe_id, _info, _mode in sequence] == [
+        201002, 201006, 701005, 701010,
+    ]
+
+
+def test_menu_item_shared_with_the_season_keeps_the_menu_priority():
+    # 牛奶 feeds the menus and the season, so its recipe must not be demoted.
+    menu_info = RecipeInfo(0, 20, 20, 8, [], 0)
+    season_info = RecipeInfo(0, 20, 20, 8, [], 0)
+    recipe = make_recipe(201002, menu_info, skip_buffer_surplus=False)
+    recipe.recipe_info_by_id[701005] = season_info
+    recipe.low_priority_products = frozenset()
+
+    sequence = recipe._build_recipe_id_sequence_to_run()
+
+    assert [recipe_id for recipe_id, _info, _mode in sequence] == [201002, 701005]

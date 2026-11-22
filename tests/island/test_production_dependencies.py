@@ -20,7 +20,7 @@ def continuous_alas_process(monkeypatch):
 
 class ProductionConfig:
     def __init__(self, values):
-        self.values = dict(values)
+        self.values = {'IslandGeneral.IslandGeneral.Season': 'season_20261105_cn', **values}
         self.writes = []
 
     def cross_get(self, key, default=None):
@@ -48,6 +48,7 @@ def make_production(places=(602, 706), claimed=(9207,), config=None):
         for place in places
     }
     main.claimed_slots = set(claimed)
+    main.has_empty_fishery_slot = False
     main.slot_finish_time = {}
     main.ensure_island_production_page = lambda: None
     main.claim_all_rewards = lambda: setattr(main, 'claimed_slots', set(claimed))
@@ -61,6 +62,33 @@ def make_production(places=(602, 706), claimed=(9207,), config=None):
 
 def dispatched(events):
     return [event[1] for event in events if event[0] == 'dispatch']
+
+
+@pytest.mark.parametrize(('empty', 'finished', 'exchange'), [
+    ((9211, 9212, 9213), (), True),
+    ((), (9211,), True),
+    ((9212, 9213), (9211,), True),
+    ((), (), False),
+    ((9013,), (), False),
+])
+def test_fish_exchange_runs_once_before_dispatch(empty, finished, exchange):
+    main, events = make_production(places=(201, 401), claimed=())
+    del main.claim_all_rewards
+    main.is_slot_empty = lambda button: button in empty or button in finished
+    main.is_slot_finished = lambda button: button in finished
+    main.claim_slot_reward = lambda button: True
+    main.exchange_surplus_fish = lambda: events.append('exchange')
+
+    main.run()
+
+    assert events.count('exchange') == int(exchange)
+    if exchange:
+        assert events[:3] == ['top', 'exchange', 'top']
+
+    events.clear()
+    main.is_slot_empty = main.is_slot_finished = lambda button: False
+    main.run()
+    assert 'exchange' not in events
 
 
 def make_transport(config, monkeypatch, claimed=True):
@@ -117,6 +145,28 @@ def test_crop_to_feed_retries_each_ranch_recipe_independently():
     main.dispatch_all(check_all_empty_slots=False)
 
     assert dispatched(events) == [9031, 9032, 9033, 9034]
+
+
+@pytest.mark.parametrize('place', [101, 201, 401, 402, 501, 502])
+@pytest.mark.parametrize('claimed', [(), (9207,)])
+def test_source_free_places_retry_empty_slots_without_ingredient_claims(place, claimed):
+    main, events = make_production(places=(place, 602), claimed=claimed)
+
+    main.dispatch_all()
+
+    assert dispatched(events) == DIC_ISLAND_PRODUCTION_PLACE[place]['slot']
+    assert ('empty', 9071) not in events
+    assert ('empty', 9072) not in events
+
+
+def test_source_free_places_only_dispatch_empty_slots():
+    main, events = make_production(places=(201, 401, 402), claimed=())
+    empty_slots = {9212, 9013, 9024}
+    main.is_slot_empty = lambda button: button in empty_slots
+
+    main.dispatch_all()
+
+    assert dispatched(events) == [9212, 9013, 9024]
 
 
 @pytest.mark.parametrize(('claimed', 'expected'), [
@@ -226,12 +276,13 @@ def test_collect_unlocks_next_production_check_after_success(success):
     assert dispatched(events) == ([9071, 9072, 9207, 9208] if success else [9207, 9208])
 
 
-def test_no_completion_or_external_reward_does_not_retry_empty_slots():
+def test_no_completion_or_external_reward_does_not_retry_dependent_slots():
     main, events = make_production(claimed=())
 
     main.dispatch_all()
 
-    assert events == []
+    assert dispatched(events) == []
+    assert all(event[0] != 'empty' for event in events)
 
 
 @pytest.mark.parametrize('check_all', [True, False])
@@ -272,7 +323,7 @@ def test_order_submission_does_not_request_full_check(submitted):
     main.config = ProductionConfig({CHECK_ALL: False})
     main.handle_island_additional = lambda: False
     main.handle_info_bar = lambda: None
-    main.click_order = lambda *args, **kwargs: None
+    main.click_order = lambda *args, **kwargs: True
     main.appear = lambda *args, **kwargs: False
     main.scan_current_order_requirements = lambda: {}
     main.is_order_satisfied = lambda *args, **kwargs: True

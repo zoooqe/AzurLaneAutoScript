@@ -709,6 +709,349 @@ def put_arg_island_items(kwargs: T_Output_Kwargs) -> Output:
     )
 
 
+class _DictConfigView:
+    """Minimal ``cross_get`` view over a plain config dict.
+
+    Restaurant helpers take an ``AzurLaneConfig``, this lets the menu widget
+    reuse them with the dict returned by ``read_file()``.
+    """
+
+    def __init__(self, data):
+        self.data = data if isinstance(data, dict) else {}
+
+    def cross_get(self, keys, default=None):
+        from module.config.deep import deep_get
+
+        return deep_get(self.data, keys, default=default)
+
+
+def island_menu_dish_amount(restaurant_id) -> int:
+    """Amount written for a dish in a restaurant menu.
+
+    The tasks only look at whether a dish is configured, the number itself is
+    the planner's estimate of daily portions, bounded by the shelf capacity.
+    Writing the current capacity keeps the config consistent with what the
+    planner would export, and it follows the grade / waitress settings.
+    """
+    from module.island_handler.restaurant_config import (
+        get_initial_capacity_from_grade,
+        get_restaurant_capacity,
+    )
+
+    default = get_initial_capacity_from_grade('diamond')
+    if restaurant_id is None:
+        return default
+    try:
+        alasgui: "AlasGUI" = local.gui
+        data = alasgui.alas_config.read_file(alasgui.alas_name)
+        return get_restaurant_capacity(_DictConfigView(data), restaurant_id)
+    except Exception:
+        # Never break the page because of a half edited config
+        return default
+
+
+def put_arg_island_menu(kwargs: T_Output_Kwargs) -> Output:
+    """Restaurant menu picker that only asks for the dishes.
+
+    The config stores ``{dish: amount}``, but the restaurant task only checks
+    whether a dish is listed in the menu: the amount is the planner's estimate
+    of how many portions a day are sold, which is bounded by the shelf capacity
+    and rewritten by the production planner on every run. So the user just
+    picks dishes, and the amount is filled in from the restaurant capacity.
+
+    Only the dishes the restaurant is able to serve are offered, taken from
+    ``DIC_ISLAND_RESTAURANT_MENU_TO_RECIPE``.
+    """
+    from module.island.item_editor import (
+        is_menu_item,
+        item_label,
+        items_from_text,
+        items_to_text,
+        menu_item_options,
+        restaurant_id_of_menu,
+        sorted_items,
+    )
+
+    name: str = kwargs["name"]
+    lang: str = kwargs.get("lang", "cn")
+    _: str = kwargs.pop("invalid_feedback", None)
+    # {item_id: amount}, mutated in place by the callbacks below
+    items = items_from_text(kwargs.get("value"))
+
+    menu_key = name.split("_")[-1]
+    restaurant_id = restaurant_id_of_menu(menu_key)
+
+    dish_pin = f"{name}_Dish"
+    list_scope = f"island_menu_list-{name}"
+
+    ROW_HEIGHT = "1.7rem"
+    ROW_BUTTON_STYLE = (
+        f"height: {ROW_HEIGHT}; min-height: {ROW_HEIGHT}; padding: 0 .4rem;"
+        " margin: 0; display: flex; align-items: center;"
+        " justify-content: center; font-size: .8125rem; line-height: 1;"
+    )
+
+    def save():
+        alasgui: "AlasGUI" = local.gui
+        alasgui.modified_config_queue.put(
+            {"name": ".".join(name.split("_")), "value": items_to_text(items)}
+        )
+
+    def make_row(item_id):
+        def delete_callback(*_):
+            items.pop(int(item_id), None)
+            save()
+            render_rows()
+
+        label = escape(item_label(item_id, lang))
+        return put_row(
+            [
+                put_html(
+                    f'<div class="island-item-name" title="{label}"'
+                    f' style="overflow: hidden; text-overflow: ellipsis;'
+                    f' white-space: nowrap; line-height: {ROW_HEIGHT}">{label}</div>'
+                ),
+                put_html(
+                    f'<button class="btn btn-outline-warning"'
+                    f' style="{ROW_BUTTON_STYLE}">'
+                    f'{t("Gui.Text.IslandItemsDelete")}</button>'
+                ).onclick(delete_callback),
+            ],
+            size="minmax(9rem, 1fr) 5.5rem",
+        ).style(f"align-items: center; padding: 0; margin: 0; height: {ROW_HEIGHT}")
+
+    def collect_rows():
+        return [make_row(item_id) for item_id in sorted(items)]
+
+    def render_rows():
+        rows = collect_rows()
+        with use_scope(list_scope, clear=True):
+            if rows:
+                # size='auto': never let the grid squeeze rows with `1fr`
+                put_column(rows, size="auto")
+            else:
+                put_text(t("Gui.Text.IslandMenuEmpty")).style("--arg-help--")
+
+    def add_callback(*_):
+        dish = pin[dish_pin]
+        if not dish or not is_menu_item(restaurant_id, dish):
+            toast(t("Gui.Text.IslandMenuInvalidDish"), duration=2, color="warn")
+            return
+        item_id = int(dish)
+        if item_id in items:
+            toast(t("Gui.Text.IslandMenuDuplicate"), duration=2, color="warn")
+            return
+        items[item_id] = island_menu_dish_amount(restaurant_id)
+        save()
+        render_rows()
+        # Back to the placeholder so the next dish is one click away
+        pin[dish_pin] = ""
+
+    def clear_callback(*_):
+        items.clear()
+        save()
+        render_rows()
+
+    options = [{"label": t("Gui.Text.IslandMenuPick"), "value": ""}]
+    options += [
+        {"label": label, "value": value}
+        for value, label in menu_item_options(restaurant_id, lang)
+    ]
+
+    initial_rows = collect_rows()
+    if not initial_rows:
+        initial_rows = [
+            put_text(t("Gui.Text.IslandMenuEmpty")).style("--arg-help--")
+        ]
+
+    return put_scope(
+        # Do NOT prefix with `arg_container-`: assets/gui/css/alas-pc.css turns
+        # those scopes into a 2-column grid (`1fr 13rem`), which squeezes this
+        # widget into 13rem and wraps dish names one character per line.
+        f"island_menu-{name}",
+        [
+            get_title_help(kwargs),
+            put_row(
+                [
+                    put_select(name=dish_pin, options=options, value=""),
+                    put_html(
+                        f'<button class="btn btn-primary"'
+                        f' style="{ROW_BUTTON_STYLE} width: 100%">'
+                        f'{t("Gui.Text.IslandMenuAdd")}</button>'
+                    ).onclick(add_callback),
+                ],
+                size="minmax(8rem, 1fr) 6.5rem",
+            ).style(f"max-width: 28rem; height: {ROW_HEIGHT}; margin: .25rem 0 .375rem"),
+            put_scope(
+                list_scope, [put_column(initial_rows, size="auto")]
+            ).style(
+                "max-width: 28rem; max-height: 22rem; overflow-y: auto;"
+                " border: 1px solid rgba(128, 128, 128, .35);"
+                " border-radius: .25rem; padding: .25rem .5rem"
+            ),
+            put_html(
+                f'<button class="btn btn-outline-warning btn-sm"'
+                f' style="margin-top: .375rem">'
+                f'{t("Gui.Text.IslandItemsClear")}</button>'
+            ).onclick(clear_callback),
+        ],
+    )
+
+
+def put_arg_island_idle_items(kwargs: T_Output_Kwargs) -> Output:
+    """Idle accumulating picker that only asks for the items.
+
+    The config value is not how many of the item to keep: it is the expected
+    daily accumulation rate the task uses to weigh idle recipes. The planner
+    fills it with the day's leftover production, which cannot be known while
+    editing the config, so the amount of one idle dispatch is written instead,
+    see `idle_accumulating_amount()`.
+
+    Only items with a production recipe are offered: anything else can never be
+    produced by an idle slot.
+    """
+    from module.island.item_editor import (
+        format_amount,
+        idle_accumulating_amount,
+        idle_accumulating_options,
+        is_producible_item,
+        item_label,
+        items_from_text,
+        items_to_text,
+    )
+
+    name: str = kwargs["name"]
+    lang: str = kwargs.get("lang", "cn")
+    _: str = kwargs.pop("invalid_feedback", None)
+    # {item_id: rate}, mutated in place by the callbacks below
+    items = items_from_text(kwargs.get("value"))
+
+    item_pin = f"{name}_IdleItem"
+    list_scope = f"island_idle_list-{name}"
+
+    ROW_HEIGHT = "1.7rem"
+    ROW_BUTTON_STYLE = (
+        f"height: {ROW_HEIGHT}; min-height: {ROW_HEIGHT}; padding: 0 .4rem;"
+        " margin: 0; display: flex; align-items: center;"
+        " justify-content: center; font-size: .8125rem; line-height: 1;"
+    )
+
+    def save():
+        alasgui: "AlasGUI" = local.gui
+        alasgui.modified_config_queue.put(
+            {"name": ".".join(name.split("_")), "value": items_to_text(items)}
+        )
+
+    def make_row(item_id, rate):
+        def delete_callback(*_):
+            items.pop(int(item_id), None)
+            save()
+            render_rows()
+
+        label = escape(item_label(item_id, lang))
+        return put_row(
+            [
+                put_html(
+                    f'<div class="island-item-name" title="{label}"'
+                    f' style="overflow: hidden; text-overflow: ellipsis;'
+                    f' white-space: nowrap; line-height: {ROW_HEIGHT}">{label}</div>'
+                ),
+                put_html(
+                    f'<div class="island-idle-rate"'
+                    f' style="text-align: right; white-space: nowrap;'
+                    f' padding-right: .5rem; font-variant-numeric: tabular-nums;'
+                    f' line-height: {ROW_HEIGHT}">{format_amount(rate)}</div>'
+                ),
+                put_html(
+                    f'<button class="btn btn-outline-warning"'
+                    f' style="{ROW_BUTTON_STYLE}">'
+                    f'{t("Gui.Text.IslandItemsDelete")}</button>'
+                ).onclick(delete_callback),
+            ],
+            size="minmax(9rem, 1fr) 4.5rem 5.5rem",
+        ).style(f"align-items: center; padding: 0; margin: 0; height: {ROW_HEIGHT}")
+
+    def collect_rows():
+        return [make_row(item_id, rate) for item_id, rate in sorted(items.items())]
+
+    def render_rows():
+        rows = collect_rows()
+        with use_scope(list_scope, clear=True):
+            if rows:
+                # size='auto': never let the grid squeeze rows with `1fr`
+                put_column(rows, size="auto")
+            else:
+                put_text(t("Gui.Text.IslandIdleEmpty")).style("--arg-help--")
+
+    def add_callback(*_):
+        item_id = pin[item_pin]
+        if not item_id or not is_producible_item(item_id):
+            toast(t("Gui.Text.IslandIdleInvalidItem"), duration=2, color="warn")
+            return
+        item_id = int(item_id)
+        if item_id in items:
+            toast(t("Gui.Text.IslandIdleDuplicate"), duration=2, color="warn")
+            return
+        rate = idle_accumulating_amount(item_id)
+        if rate is None or rate <= 0:
+            toast(t("Gui.Text.IslandIdleInvalidItem"), duration=2, color="warn")
+            return
+        items[item_id] = rate
+        save()
+        render_rows()
+        # Back to the placeholder so the next item is one click away
+        pin[item_pin] = ""
+
+    def clear_callback(*_):
+        items.clear()
+        save()
+        render_rows()
+
+    options = [{"label": t("Gui.Text.IslandIdlePick"), "value": ""}]
+    options += [
+        {"label": label, "value": value} for value, label in idle_accumulating_options(lang)
+    ]
+
+    initial_rows = collect_rows()
+    if not initial_rows:
+        initial_rows = [
+            put_text(t("Gui.Text.IslandIdleEmpty")).style("--arg-help--")
+        ]
+
+    return put_scope(
+        # Do NOT prefix with `arg_container-`: assets/gui/css/alas-pc.css turns
+        # those scopes into a 2-column grid (`1fr 13rem`), which squeezes this
+        # widget into 13rem and wraps item names one character per line.
+        f"island_idle-{name}",
+        [
+            get_title_help(kwargs),
+            put_row(
+                [
+                    put_select(name=item_pin, options=options, value=""),
+                    put_html(
+                        f'<button class="btn btn-primary"'
+                        f' style="{ROW_BUTTON_STYLE} width: 100%">'
+                        f'{t("Gui.Text.IslandItemsAdd")}</button>'
+                    ).onclick(add_callback),
+                ],
+                size="minmax(8rem, 1fr) 6.5rem",
+            ).style(f"max-width: 28rem; height: {ROW_HEIGHT}; margin: .25rem 0 .375rem"),
+            put_scope(
+                list_scope, [put_column(initial_rows, size="auto")]
+            ).style(
+                "max-width: 28rem; max-height: 22rem; overflow-y: auto;"
+                " border: 1px solid rgba(128, 128, 128, .35);"
+                " border-radius: .25rem; padding: .25rem .5rem"
+            ),
+            put_html(
+                f'<button class="btn btn-outline-warning btn-sm"'
+                f' style="margin-top: .375rem">'
+                f'{t("Gui.Text.IslandItemsClear")}</button>'
+            ).onclick(clear_callback),
+        ],
+    )
+
+
 _widget_type_to_func: Dict[str, Callable] = {
     "input": put_arg_input,
     "lock": put_arg_state,
@@ -721,6 +1064,8 @@ _widget_type_to_func: Dict[str, Callable] = {
     "state": put_arg_state,
     "stored": put_arg_stored,
     "island_items": put_arg_island_items,
+    "island_menu": put_arg_island_menu,
+    "island_idle_items": put_arg_island_idle_items,
 }
 
 

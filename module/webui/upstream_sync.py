@@ -112,6 +112,9 @@ CONFLICT_RE = re.compile(
     r"<<<<<<< HEAD\r?\n(.*?)=======\r?\n(.*?)>>>>>>> [^\n]*\r?\n", re.S
 )
 ASSET_DEF_RE = re.compile(r"^([A-Z][A-Z0-9_]*)\s*=\s*(Button|Template)\(")
+# Any CJK character: enough to tell a translated string from the English
+# placeholder upstream ships before the translators catch up.
+CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
 
 
 class SyncResult:
@@ -211,15 +214,45 @@ def _resolve_theirs(repo, path):
     return True, ""
 
 
-def _resolve_i18n(repo, path):
-    """Keep the members of both sides of every conflict block.
+def _has_cjk(text):
+    return bool(CJK_RE.search(text))
 
-    Upstream appends its new options at the same place in the file where this
-    branch appends its own, so taking either side silently drops the other.
-    Both blocks end on the last value of a member and share the closing brace,
-    so the local block only needs its own member closed before the upstream one
-    follows.
+
+def _merge_i18n(ours, theirs):
+    """Merge two i18n trees key by key.
+
+    Upstream rewrites the season names whenever a season is added and this
+    branch carries its own Traditional Chinese wording for them, so the same
+    block changes on both sides. Taking one side wholesale drops either the new
+    upstream keys or the local translations, and splicing the two text blocks
+    together produces invalid JSON as soon as a line is changed instead of
+    appended. Merging the parsed trees handles both shapes.
+
+    A local string that is translated wins over an upstream English
+    placeholder, which is how upstream ships a new season name before its
+    translators catch up. Everywhere else upstream wins, since it knows the new
+    keys, and a key only this branch has is kept: an extra line of text never
+    breaks the GUI, a missing one shows a raw option name.
     """
+    if isinstance(ours, dict) and isinstance(theirs, dict):
+        merged = {}
+        for key, value in ours.items():
+            if key in theirs:
+                merged[key] = _merge_i18n(value, theirs[key])
+            else:
+                merged[key] = value
+        for key, value in theirs.items():
+            if key not in merged:
+                merged[key] = value
+        return merged
+    if isinstance(ours, str) and isinstance(theirs, str) and ours != theirs:
+        if _has_cjk(ours) and not _has_cjk(theirs):
+            return ours
+    return theirs
+
+
+def _resolve_i18n(repo, path):
+    """Merge the two sides of every conflict block as JSON, not as text."""
     full = os.path.join(ROOT, path.replace("/", os.sep))
     with open(full, "r", encoding="utf-8") as f:
         text = f.read()
@@ -227,27 +260,21 @@ def _resolve_i18n(repo, path):
         repo.run("add", "--", path)
         return True, "no conflict marker"
 
-    def both_sides(match):
-        ours, theirs = match.group(1), match.group(2)
-        if not theirs.strip():
-            return ours
-        if not ours.strip():
-            return theirs
-        indent = re.match(r"([ \t]*)\S", ours)
-        indent = indent.group(1) if indent else ""
-        return ours.rstrip() + "\n" + indent + "},\n" + theirs
-
-    text = CONFLICT_RE.sub(both_sides, text)
-    if "<<<<<<<" in text or ">>>>>>>" in text:
+    ours_text = CONFLICT_RE.sub(lambda m: m.group(1), text)
+    theirs_text = CONFLICT_RE.sub(lambda m: m.group(2), text)
+    if "<<<<<<<" in ours_text or ">>>>>>>" in ours_text:
         return False, "conflict markers left after resolution"
     try:
-        json.loads(text)
+        ours = json.loads(ours_text)
+        theirs = json.loads(theirs_text)
     except Exception as e:
         return False, "invalid json: %s" % e
+
+    text = json.dumps(_merge_i18n(ours, theirs), ensure_ascii=False, indent=2) + "\n"
     with open(full, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     repo.run("add", "--", path)
-    return True, ""
+    return True, "merged"
 
 
 def _asset_definitions(text):
@@ -378,6 +405,15 @@ def sync(dry_run=False, push=False):
         if not os.path.isdir(os.path.join(ROOT, ".git")):
             return SyncResult("disabled", "not a git checkout")
 
+        # A sync that died mid-merge leaves MERGE_HEAD behind, and every later
+        # merge then refuses to start with "You have not concluded your merge",
+        # which is what a user sees as a permanent update failure.
+        if os.path.exists(os.path.join(ROOT, ".git", "MERGE_HEAD")):
+            logger.warning("Upstream sync: leftover merge state, aborting it first")
+            code, _, err = repo.run("merge", "--abort")
+            if code != 0:
+                logger.error("Upstream sync: cannot abort the leftover merge: %s" % (err or "unknown"))
+
         dirty = repo.dirty_tracked()
         if dirty:
             logger.warning("Upstream sync: %d tracked file(s) modified, skip" % len(dirty))
@@ -452,7 +488,16 @@ def sync(dry_run=False, push=False):
             else:
                 ok, detail = False, "unexpected conflict"
             if not ok:
-                repo.run("reset", "--hard", before)
+                code, _, err = repo.run("reset", "--hard", before)
+                if code != 0:
+                    # Windows occasionally refuses the index write while another
+                    # process holds it. An abort clears the merge state that a
+                    # failed reset would leave behind.
+                    logger.warning("Upstream sync: reset failed (%s), aborting the merge" % (err or "unknown"))
+                    repo.run("merge", "--abort")
+                    code, _, err = repo.run("reset", "--hard", before)
+                    if code != 0:
+                        logger.error("Upstream sync: reset failed again (%s)" % (err or "unknown"))
                 return SyncResult("failed", "%s: %s" % (path, detail), [path])
             notes.append("%s (%s)" % (path, detail))
 

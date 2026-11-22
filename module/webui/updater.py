@@ -212,6 +212,15 @@ class Updater(DeployConfig, GitManager, PipManager):
         if result.status == "up-to-date":
             logger.info("Already up to date")
             return
+        if result.status == "dirty":
+            # Uncommitted work is not merged over: the merge would either fail or
+            # take the local edit with it. Say which files, "update failed" alone
+            # gives the user nothing to act on.
+            for path in result.files:
+                logger.warning(f"  not committed: {path}")
+            raise ExecutionError(
+                f"local changes are not committed: {', '.join(result.files)}"
+            )
         if result.status == "needs-manual":
             for path in result.files:
                 logger.warning(f"  needs manual merge: {path}")
@@ -230,7 +239,10 @@ class Updater(DeployConfig, GitManager, PipManager):
         try:
             self.git_install()
             self.pip_install()
-        except ExecutionError:
+        except ExecutionError as e:
+            # Logged here: State only shows "update failed", the reason would be
+            # lost otherwise.
+            logger.error(f"Update failed: {e}")
             return False
         return True
 

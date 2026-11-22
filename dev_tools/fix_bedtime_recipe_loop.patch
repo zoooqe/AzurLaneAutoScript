@@ -1,0 +1,53 @@
+diff --git a/module/island_handler/recipe.py b/module/island_handler/recipe.py
+index f0877ffb..8fb895bc 100644
+--- a/module/island_handler/recipe.py
++++ b/module/island_handler/recipe.py
+@@ -682,10 +682,16 @@ class IslandRecipe(IslandExchange, IslandShop):
+         if not hours or place_id is None:
+             return []
+         planned = {entry[0] for entry in sequence}
++        # A recipe that already failed to start is out of ingredients, and the
++        # stock does not change while the sequence is rebuilt, so offering it as
++        # a filler again would retry it forever. Filtration is per recipe rather
++        # than per mode: the failure reason (missing ingredient) is the same in
++        # every mode.
++        failed_recipes = {recipe_id for recipe_id, _mode in self.checked_recipe_modes}
+         full = []
+         partial = []
+         for recipe_id, info in self.recipe_info_by_id.items():
+-            if recipe_id in planned or recipe_id // 1000 != place_id:
++            if recipe_id in planned or recipe_id in failed_recipes or recipe_id // 1000 != place_id:
+                 continue
+             data = DIC_ISLAND_RECIPE[recipe_id]
+             entry = (recipe_id, info, RECIPE_MODE_BEDTIME)
+@@ -1176,7 +1182,17 @@ class IslandRecipe(IslandExchange, IslandShop):
+         self.bedtime_place_id = slot['place'] if slot else None
+         del_cached_property(self, 'recipe_grid')
+         del_cached_property(self, 'recipe_ids')
++        # Each failed attempt marks one (recipe, mode) as checked, so the rebuilt
++        # sequence is shorter every time. This guard only catches a rebuild path
++        # that forgets those marks: without it such a path keeps clicking the
++        # recipe menu and never leaves this loop.
++        failed_attempts = 0
++        max_failed_attempts = None
+         while self.recipe_id_sequence:
++            if max_failed_attempts is None:
++                # Read after the first touch of recipe_id_sequence: only then has
++                # the scanned recipe info been built.
++                max_failed_attempts = len(self.recipe_info_by_id) * 3 + 8
+             for recipe_id, info, mode in self.recipe_id_sequence:
+                 recipe = get_recipe_data(recipe_id)
+                 if recipe['workload'] <= available_workload:
+@@ -1242,5 +1258,12 @@ class IslandRecipe(IslandExchange, IslandShop):
+                     )
+                 self.checked_recipe_modes.add((recipe_id, mode))
+                 self.recipe_id_sequence = self._build_recipe_id_sequence_to_run()
++                failed_attempts += 1
++                if failed_attempts > max_failed_attempts:
++                    logger.warning(
++                        f'Gave up after {failed_attempts} failed recipe attempts, '
++                        'stop dispatching this slot'
++                    )
++                    break
+         logger.info('No recipe to run or failed to run any recipe')
+         return None

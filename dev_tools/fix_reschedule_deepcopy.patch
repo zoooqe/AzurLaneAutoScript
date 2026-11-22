@@ -1,0 +1,17 @@
+diff --git a/alas.py b/alas.py
+index 3a4373c9..1ff1297e 100644
+--- a/alas.py
++++ b/alas.py
+@@ -568,6 +568,12 @@ class AzurLaneAutoScript:
+         """
+         if not self.config.is_task_enabled(task):
+             return False
++        # Campaign tasks run on a deepcopy of the config, see
++        # module/campaign/run.py: `copy.deepcopy(self.config).merge(...)`.
++        # Their task_delay() writes the file but never this instance's data,
++        # so reading self.config.data here would see the stale NextRun and
++        # mistake a delayed task for an idle one. Reload from the file first.
++        self.config.load()
+         next_run_now = deep_get(
+             self.config.data, keys=f'{task}.Scheduler.NextRun', default=None
+         )

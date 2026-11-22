@@ -123,3 +123,12 @@ Text:
   IslandItemsEdit:
   IslandItemsInvalidItem:
   IslandItemsInvalidAmount:
+  IslandMenuPick:
+  IslandMenuAdd:
+  IslandMenuEmpty:
+  IslandMenuInvalidDish:
+  IslandMenuDuplicate:
+  IslandIdlePick:
+  IslandIdleEmpty:
+  IslandIdleInvalidItem:
+  IslandIdleDuplicate:

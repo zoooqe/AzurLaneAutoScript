@@ -11,7 +11,7 @@ instance or UI dependency here, which keeps it unit testable.
 """
 from typing import Dict, List, Optional, Tuple
 
-from module.island.data import DIC_ISLAND_ITEM
+from module.island.data import DIC_ISLAND_ITEM, DIC_ISLAND_RESTAURANT_MENU_TO_RECIPE
 from module.island.utils import (
     item_mapping_to_yaml,
     load_item_mapping,
@@ -20,6 +20,9 @@ from module.island.utils import (
 
 # Amounts are planned as float, 3 decimals is already beyond game precision.
 AMOUNT_PRECISION = 3
+
+# {item_id} of everything a production recipe outputs, filled on first use.
+_PRODUCIBLE_ITEM_IDS = None
 
 
 def _item_names(item_id) -> Dict[str, str]:
@@ -144,3 +147,111 @@ def set_item(items: Dict[int, float], item_id, amount) -> Dict[int, float]:
 
 def sorted_items(items) -> List[Tuple[int, float]]:
     return [(item_id, items[item_id]) for item_id in sorted(items or {})]
+
+
+def producible_items() -> List[int]:
+    """Item ids some production recipe outputs, sorted by id.
+
+    Items only obtainable from the shop, exchange or gathering have no recipe,
+    so they can never be accumulated by idle production and are not offered in
+    the idle accumulating picker.
+    """
+    return sorted(_producible_item_ids())
+
+
+def _producible_item_ids():
+    global _PRODUCIBLE_ITEM_IDS
+    if _PRODUCIBLE_ITEM_IDS is None:
+        from module.island.data import DIC_ISLAND_RECIPE
+
+        items = set()
+        for recipe in DIC_ISLAND_RECIPE.values():
+            for item_id, amount in (recipe.get('commission_product') or {}).items():
+                if amount > 0:
+                    items.add(int(item_id))
+        _PRODUCIBLE_ITEM_IDS = frozenset(items)
+    return _PRODUCIBLE_ITEM_IDS
+
+
+def idle_accumulating_options(lang: str = 'cn') -> List[Tuple[str, str]]:
+    """[(value, label)] of the items idle production can accumulate."""
+    return [(str(item_id), item_label(item_id, lang)) for item_id in producible_items()]
+
+
+def is_producible_item(item_id) -> bool:
+    try:
+        return int(item_id) in _producible_item_ids()
+    except (TypeError, ValueError):
+        return False
+
+
+def idle_accumulating_amount(item_id, dispatch_hours=None) -> Optional[float]:
+    """Expected daily accumulation rate written for an idle item.
+
+    The config value is not a stock amount: it is the rate used to weigh how
+    fast a surplus of that item is burned down, and the planner normally fills
+    it with the leftover production of the day.
+
+    For an item the planner would not pick there is no planned rate, so the
+    amount one idle dispatch produces is written instead: the batches that fit
+    in `ISLAND_IDLE_ACCUMULATING_DISPATCH_HOURS` of workload, times the batch
+    output. That is exactly what the task commits when it runs the recipe in
+    idle accumulating mode.
+    """
+    from module.island.data import DIC_ISLAND_RECIPE
+    from module.island.utils import get_idle_accumulating_batch_count
+
+    if dispatch_hours is None:
+        try:
+            from module.config.config_manual import ManualConfig
+
+            dispatch_hours = ManualConfig.ISLAND_IDLE_ACCUMULATING_DISPATCH_HOURS
+        except Exception:
+            dispatch_hours = 6
+
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return None
+
+    for recipe in DIC_ISLAND_RECIPE.values():
+        outputs = recipe.get('commission_product') or {}
+        if outputs.get(item_id, 0) <= 0:
+            continue
+        batches = get_idle_accumulating_batch_count(recipe['workload'], dispatch_hours)
+        return parse_amount(batches * outputs[item_id])
+    return None
+
+
+def restaurant_id_of_menu(menu_key) -> Optional[int]:
+    """Map a menu config key such as ``KoiMenu`` back to its restaurant id."""
+    from module.island_handler.restaurant_config import RESTAURANT_CONFIG
+
+    for restaurant_id, config in RESTAURANT_CONFIG.items():
+        if config['menu_key'] == menu_key:
+            return restaurant_id
+    return None
+
+
+def menu_item_options(restaurant_id, lang: str = 'cn') -> List[Tuple[str, str]]:
+    """[(value, label)] of the dishes this restaurant is able to serve.
+
+    The menu of a restaurant is fixed by the game data, dishes of another
+    restaurant cannot be put on its shelves, so the picker offers only these.
+    """
+    try:
+        restaurant_id = int(restaurant_id)
+    except (TypeError, ValueError):
+        return []
+    menu = DIC_ISLAND_RESTAURANT_MENU_TO_RECIPE.get(restaurant_id, {})
+    return [(str(item_id), item_label(item_id, lang)) for item_id in sorted(menu)]
+
+
+def is_menu_item(restaurant_id, item_id) -> bool:
+    """Whether the dish belongs to this restaurant's menu."""
+    try:
+        restaurant_id = int(restaurant_id)
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return False
+    return item_id in DIC_ISLAND_RESTAURANT_MENU_TO_RECIPE.get(restaurant_id, {})
